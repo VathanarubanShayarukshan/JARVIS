@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgenticAI</title>
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+</head>
+<body>
+
+<!-- ---------- first-time setup ---------- -->
+<div id="setup-screen" class="center-screen hidden">
+  <div class="card">
+    <h1>AgenticAI</h1>
+    <p class="muted">Self-hosted agentic AI. No GPU needed — the server uses a free cloud model.</p>
+    <label>Set an admin password</label>
+    <input type="password" id="setup-password" placeholder="password">
+    <button class="primary" id="setup-btn">Create admin account</button>
+    <p class="error" id="setup-error"></p>
+  </div>
+</div>
+
+<!-- ---------- login ---------- -->
+<div id="login-screen" class="center-screen hidden">
+  <div class="card">
+    <h1>AgenticAI</h1>
+    <p class="muted">Sign in to your self-hosted agent.</p>
+    <label>Admin password</label>
+    <input type="password" id="login-password" placeholder="password">
+    <button class="primary" id="login-btn">Sign in</button>
+    <p class="error" id="login-error"></p>
+  </div>
+</div>
+
+<!-- ---------- main app ---------- -->
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <button class="new-chat" id="new-chat-btn">+ New chat</button>
+      <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+    </div>
+    <nav id="session-list" class="session-list"></nav>
+    <div class="sidebar-foot">
+      <button class="ghost" id="logout-btn">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <select id="model-select" title="Model" class="model-select"></select>
+      <span id="online-dot" class="dot" title="connection"></span>
+    </header>
+
+    <div id="chat" class="chat"></div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Ask anything — the agent can read/write files, run commands and search the web…"></textarea>
+        <div class="composer-foot">
+          <label class="hint">
+            <input type="checkbox" id="auto-title"> auto-title chats
+          </label>
+          <button id="send-btn" class="primary send">Send ↵</button>
+        </div>
+      </div>
+      <p class="composer-note muted">Work happens in the server workspace: <span id="ws-path"></span></p>
+    </div>
+  </main>
+
+  <!-- ---------- settings / admin dialog ---------- -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button class="icon-btn" id="settings-close">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab active" data-tab="models">Models</button>
+        <button class="tab" data-tab="tokens">API tokens</button>
+        <button class="tab" data-tab="account">Account</button>
+        <button class="tab" data-tab="files">Files</button>
+      </div>
+
+      <div class="tab-panel" id="tab-models">
+        <p class="muted small">End users never need an API key. Add a <b>free</b> key here once: Google Gemini, Groq or OpenRouter (all free, no card required). A local LLM found on the server also works automatically.</p>
+        <div id="provider-list"></div>
+        <details class="add-provider">
+          <summary>+ Custom provider (any OpenAI-compatible endpoint)</summary>
+          <div class="row">
+            <input id="p-name" placeholder="name">
+            <input id="p-url" placeholder="https://api.example.com/v1">
+            <input id="p-key" type="password" placeholder="API key (free tier OK)">
+            <input id="p-models" placeholder="model-a,model-b (optional)">
+          </div>
+          <div class="row">
+            <button class="primary" id="probe-btn">Check connectivity</button>
+            <button id="add-provider-btn">Add provider</button>
+          </div>
+          <p id="probe-out" class="muted small"></p>
+        </details>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-tokens">
+        <p class="muted small">API tokens let other web apps / tools call this agent's API (<code>/api/chat</code>, sessions, files) via <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+        <div class="row">
+          <input id="token-name" placeholder="e.g. my-web-app">
+          <button id="create-token-btn">Create token</button>
+        </div>
+        <ul id="token-list"></ul>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-account">
+        <label>Change admin password</label>
+        <div class="row">
+          <input id="new-pass" type="password" placeholder="new password">
+          <button id="change-pass-btn">Save</button>
+        </div>
+        <p class="muted small">Workspace folder on the server: <code id="ws-path2"></code></p>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-files">
+        <div class="file-panel">
+          <div id="file-tree" class="file-tree"></div>
+          <div class="file-editor">
+            <div class="row">
+              <span id="file-path" class="muted small">select a file</span>
+              <button id="file-save" class="primary hidden">Save file</button>
+            </div>
+            <textarea id="file-content" class="file-content" placeholder="Click a file in the workspace to view/edit it"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

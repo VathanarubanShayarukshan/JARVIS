@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+data-test/
+.env
+*.log
+stub_requests.jsonl
+.git/.opencode/
