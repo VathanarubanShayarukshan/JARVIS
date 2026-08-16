@@ -171,6 +171,12 @@ Rules:
 - All file access is restricted to the workspace folder. File tool paths are
   relative to the workspace. Never try to escape it.
 - Shell commands can take a while; use them for builds, tests, git, etc.
+- On Windows, commands run in PowerShell: do NOT use bash-only syntax such as
+  `||`, `&&`, `uname`, `ls -la`, `/dev/null`, or `which`. Use PowerShell
+  equivalents (e.g. `Get-ChildItem`, `Get-ComputerInfo`, `$LASTEXITCODE`).
+  When you need environment details like CPU/RAM/disk or could not parse a
+  platform-specific error, prefer the `run_script` tool with language
+  "powershell" and Windows cmdlets.
 - If you cannot complete the task, say exactly what blocked you.
 - After the user's request is fully handled, give a short final summary.
 """

@@ -7,3 +7,5 @@ data-test/
 *.log
 stub_requests.jsonl
 .git/.opencode/
+
+.opencode/

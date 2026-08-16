@@ -22,8 +22,11 @@ const state = {
   busy: false,
   autoTitle: true,
   modelKey: localStorage.getItem("modelKey") || "",
+  modelPrefs: JSON.parse(localStorage.getItem("modelPrefs") || "{}"),
   abort: null,
 };
+
+const uiState = { activity: null, answer: "", toolCount: 0 };
 
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -159,6 +162,7 @@ async function newSession() {
   state.sessionId = s.id;
   localStorage.setItem("session", s.id);
   await loadSessions();
+  applyModelPrefFor(s.id);
   renderChat([]);
   $("input").focus();
 }
@@ -167,6 +171,7 @@ async function selectSession(id) {
   state.sessionId = id;
   localStorage.setItem("session", id);
   const msgs = await json(await api(`/api/sessions/${id}/messages`));
+  applyModelPrefFor(id);
   renderChat(msgs);
   renderSessions();
 }
@@ -219,26 +224,71 @@ function appendMsg(role) {
   body.className = "body";
   div.appendChild(Object.assign(document.createElement("div"), { className: "meta", textContent: role === "user" ? "you" : "agent" }));
   div.appendChild(body);
+  const activity = document.createElement("div");
+  activity.className = "activity hidden";
+  div.appendChild(activity);
   chatEl.querySelector(".chat-inner").appendChild(div);
-  return { div, body };
+  scrollChat();
+  return { div, body, activity };
 }
 
-function addToolCard(name) {
-  const card = document.createElement("div");
-  card.className = "tool-card";
-  const head = document.createElement("div");
-  head.className = "tool-head";
-  head.innerHTML =
-    `<span class="tool">⚒</span><span class="name">${esc(name)}</span><span class="status running"></span>`;
-  const body = document.createElement("div");
-  body.className = "tool-body";
-  body.hidden = true;
-  head.onclick = () => (body.hidden = !body.hidden);
-  card.appendChild(head);
-  card.appendChild(body);
-  chatEl.querySelector(".chat-inner").appendChild(card);
-  chatEl.scrollTop = chatEl.scrollHeight;
-  return { card, head, body };
+/* compact "working" indicator + collapsible tool log (hidden by default) */
+function makeActivity(activity) {
+  const pill = document.createElement("div");
+  pill.className = "act-pill";
+  pill.innerHTML = '<span class="spin">⚙</span><span class="txt">working…</span>';
+  activity.appendChild(pill);
+  activity.classList.remove("hidden");
+
+  const toolbar = document.createElement("details");
+  toolbar.className = "toolbar";
+  toolbar.hidden = true;
+  const summary = document.createElement("summary");
+  toolbar.appendChild(summary);
+  const list = document.createElement("div");
+  list.className = "tool-list";
+  toolbar.appendChild(list);
+  activity.appendChild(toolbar);
+  let rows = [];
+
+  return {
+    status: (txt) => {
+      if (toolbar.hidden) {
+        pill.hidden = false;
+        pill.querySelector(".txt").textContent = txt;
+      }
+    },
+    dismiss: () => pill.hidden = true,
+    addTool: (name) => {
+      pill.hidden = false;
+      pill.querySelector(".txt").textContent = "using " + name + "…";
+      const row = document.createElement("div");
+      row.className = "tool-row";
+      row.innerHTML = `<span class="spin">⚙</span><span class="tname">${esc(name)}</span><span class="running">…</span>`;
+      list.appendChild(row);
+      rows.push(row);
+      toolbar.hidden = false;
+      toolbar.open = false;
+    },
+    toolDone: (name, ok) => {
+      const row = rows[rows.length - 1];
+      if (row) {
+        const s = row.querySelector(".running");
+        s.textContent = ok ? "done" : "error";
+        s.className = ok ? "tstatus ok" : "tstatus err";
+        row.querySelector(".spin").textContent = ok ? "✓" : "✕";
+      }
+      pill.hidden = true;
+    },
+    finish: () => {
+      pill.hidden = true;
+      toolbar.hidden = false;
+      toolbar.open = false;
+      const c = rows.length;
+      summary.innerHTML = `⚙ ${c} tool call${c === 1 ? "" : "s"}` + (c ? ` <span class="hint">— tap to view</span>` : "");
+    },
+    rows,
+  };
 }
 
 function scrollChat() {
@@ -251,20 +301,18 @@ async function send() {
   const input = $("input");
   const text = input.value.trim();
   if (!text || !state.sessionId || state.busy) return;
-  if (!state.busy) {
-    $("send-btn").disabled = true;
-  }
+  state.busy = true;
+  $("send-btn").disabled = true;
   appendMsg("user").body.textContent = text;
   input.value = "";
   input.style.height = "auto";
   scrollChat();
 
   const userText = text;
-  const { body: asBody } = appendMsg("assistant");
-  asBody.innerHTML = '<span class="muted">…</span>';
-  uiState.md = "";
-  uiState.statusShown = false;
-  uiState.pendingTools = new Map();
+  const { body: asBody, activity: asActivity } = appendMsg("assistant");
+  uiState.activity = makeActivity(asActivity);
+  uiState.answer = "";
+  uiState.toolCount = 0;
 
   try {
     const r = await api("/api/chat", {
@@ -307,51 +355,38 @@ async function send() {
   }
 }
 
-const uiState = { md: "", statusShown: false, pendingTools: new Map() };
-
 function handleEvent(ev, asBody) {
-  uiState.statusShown = uiState.statusShown || (ev.type === "text" || ev.type === "tool_call" || ev.type === "done");
+  const a = uiState.activity;
   switch (ev.type) {
     case "status":
-      if (!uiState.statusShown) {
-        asBody.innerHTML = '<span class="muted">' + esc(ev.message) + "</span>";
-      }
+      a.status(ev.message);
       break;
     case "text":
-      uiState.md += ev.text;
-      asBody.innerHTML = renderMarkdown(uiState.md);
-      if (!uiState.md.trim()) { asBody.innerHTML = '<span class="muted">…</span>'; }
+      a.dismiss();
+      uiState.answer += ev.text;
+      asBody.innerHTML = renderMarkdown(uiState.answer);
       scrollChat();
       break;
-    case "tool_call": {
-      const card = addToolCard(ev.name);
-      card.body.textContent = JSON.stringify(ev.arguments, null, 2) || "{}";
-      card.head.querySelector(".status").textContent = "running";
-      uiState.pendingTools.set(ev.id, card);
+    case "tool_call":
+      uiState.toolCount++;
+      a.addTool(ev.name);
+      scrollChat();
       break;
-    }
-    case "tool_result": {
-      const card = uiState.pendingTools.get(ev.id);
-      if (card) {
-        card.body.textContent = ev.result;
-        card.body.hidden = false;
-        card.head.querySelector(".status").textContent = "done";
-        card.head.querySelector(".status").className = "status done";
-        uiState.pendingTools.delete(ev.id);
-      }
+    case "tool_result":
+      a.toolDone(ev.name, !String(ev.result).startsWith("Error"));
       break;
-    }
     case "done":
-      if (ev.content && asBody.textContent.trim() !== ev.content.trim()) {
-        uiState.md = ev.content;
-        asBody.innerHTML = renderMarkdown(uiState.md);
+      a.finish();
+      if (ev.content) {
+        uiState.answer = ev.content;
+        asBody.innerHTML = renderMarkdown(ev.content);
       }
       if (state.autoTitle) autoTitle();
       scrollChat();
       break;
     case "error":
+      a.finish();
       asBody.innerHTML = `<span class="error">${esc(ev.message)}</span>`;
-      if (uiState.pendingTools.size) { uiState.pendingTools.clear(); }
       scrollChat();
       break;
   }
@@ -371,10 +406,13 @@ async function autoTitle() {
 /* ---------------- provider / model selection ---------------- */
 
 function modelProviderId() {
-  const parts = state.modelKey.split("|");
+  const parts = String(state.modelKey || "").split("|");
   return parts[0] || null;
 }
-function modelId() { return null; } // server picks the first model of the provider
+function modelId() {
+  const parts = String(state.modelKey || "").split("|");
+  return parts[1] || null;
+}
 
 async function loadProviders() {
   try {
@@ -382,16 +420,20 @@ async function loadProviders() {
   } catch { state.providers = []; }
   const sel = $("model-select");
   sel.innerHTML = "";
-  let i = 0;
   for (const p of state.providers) {
-    if (!p.api_key && !p.local) continue;
-    for (const m of (p.models || []).slice(0, 8)) {
+    if (!p.api_key_set && !p.local) continue;
+    const models = (Array.isArray(p.models) ? p.models : []).slice(0, 300);
+    if (!models.length) continue;
+    const og = document.createElement("optgroup");
+    og.label = p.name + (p.local ? " (local)" : "");
+    for (const m of models) {
       const o = document.createElement("option");
-      o.value = p.id + "|" + i++;
-      o.textContent = `${p.name} — ${m}`;
-      sel.appendChild(o);
+      o.value = p.id + "|" + m;
+      o.textContent = m;
+      og.appendChild(o);
       if (!state.modelKey) state.modelKey = o.value;
     }
+    sel.appendChild(og);
   }
   if (sel.options.length === 0) {
     const o = document.createElement("option");
@@ -406,7 +448,21 @@ async function loadProviders() {
   sel.onchange = () => {
     state.modelKey = sel.value;
     localStorage.setItem("modelKey", sel.value);
+    if (state.sessionId) {
+      state.modelPrefs[state.sessionId] = sel.value;
+      localStorage.setItem("modelPrefs", JSON.stringify(state.modelPrefs));
+    }
   };
+}
+
+function applyModelPrefFor(sessionId) {
+  const sel = $("model-select");
+  const pref = state.modelPrefs[sessionId];
+  const target = pref && [...sel.options].some((o) => o.value === pref) ? pref : state.modelKey;
+  if (target && [...sel.options].some((o) => o.value === target)) {
+    sel.value = target;
+    state.modelKey = target;
+  }
 }
 
 /* ---------------- composer ---------------- */
@@ -469,9 +525,14 @@ function renderProviders() {
       `<button class="save-key">Set key</button>` +
       (p.is_custom ? `<button class="remove">Delete</button>` : "") + `</div>`;
     if (p.hint) item.innerHTML += `<p class="p-hint">${esc(p.hint)}</p>`;
-    const models = p.models || [];
+    const allModels = p.models || [];
+    const models = allModels.slice(0, 40);
+    const more = allModels.length > 40
+      ? `<span class="model-pill">+${allModels.length - 40} more</span>`
+      : "";
     item.innerHTML += `<div class="p-models">` +
-      models.map((m, i) => `<span class="model-pill" data-m="${i}">${esc(m)}</span>`).join("") + `</div>`;
+      models.map((m) => `<span class="model-pill">${esc(m)}</span>`).join("") +
+      more + `</div>`;
     const keyInput = item.querySelector(".api-key-row input");
     item.querySelector(".save-key").onclick = async () => {
       const key = keyInput.value.trim();
@@ -496,6 +557,9 @@ function renderProviders() {
   }
 }
 
+const BMODEL_LIMIT = 40;
+let lastProbe = [];
+
 $("probe-btn").onclick = async () => {
   $("probe-out").textContent = "probing…";
   const r = await api("/api/providers/probe", {
@@ -504,12 +568,19 @@ $("probe-btn").onclick = async () => {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $("probe-out").textContent = j.detail || "failed"; return; }
-  $("p-models").value = (j.models || []).join(",");
-  $("probe-out").textContent = "Connected. Models found: " + (j.models || []).length;
+  lastProbe = j.models || [];
+  if (lastProbe.length > BMODEL_LIMIT) {
+    $("p-models").value = "";
+    $("probe-out").textContent = `Connected. ${lastProbe.length} models found — will import them all (use the field to limit to specific ones).`;
+  } else {
+    $("p-models").value = lastProbe.join(",");
+    $("probe-out").textContent = "Connected. Models found: " + lastProbe.length;
+  }
 };
 
 $("add-provider-btn").onclick = async () => {
-  const models = $("p-models").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const typed = $("p-models").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const models = typed.length ? typed : lastProbe;
   const r = await api("/api/providers", {
     method: "POST",
     body: {
@@ -521,7 +592,8 @@ $("add-provider-btn").onclick = async () => {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $("probe-out").textContent = j.detail || "failed"; return; }
-  $("probe-out").textContent = "added";
+  $("probe-out").textContent = `added (${models.length} models)`;
+  lastProbe = [];
   $("p-name").value = ""; $("p-url").value = ""; $("p-key").value = ""; $("p-models").value = "";
   await loadAll();
   renderProviders();

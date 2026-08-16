@@ -42,6 +42,17 @@ locally (needs lots of CPU/GPU/RAM). AgenticAI fixes that:
 
 Requirements: Python 3.11+ (or Docker).
 
+Linux / macOS:
+```bash
+./setup.sh          # creates .venv, installs deps, starts server
+```
+
+Windows:
+```bat
+start.bat
+```
+
+Or manually:
 ```bash
 pip install -r requirements.txt
 python -m app.main
@@ -52,9 +63,10 @@ password. Then go to **Settings → Models** and paste a free key:
 
 | Provider | Free key | Free, tool-capable models |
 | --- | --- | --- |
-| Google Gemini | https://aistudio.google.com/apikey | `gemini-2.5-flash` |
+| Google Gemini | https://aistudio.google.com/apikey | `gemini-3.6-flash` |
 | Groq | https://console.groq.com/keys | `llama-3.3-70b-versatile` |
 | OpenRouter | https://openrouter.ai/settings/keys | models ending in `:free` |
+| Hugging Face | https://huggingface.co/settings/tokens | free models via `router.huggingface.co` |
 
 Click **Check connectivity**, then **Set key** on the provider row. Pick the
 model in the top-right dropdown and start chatting. That's it — every other
@@ -72,6 +84,7 @@ docker run -d -p 8000:8000 -v agentic-data:/data agentic-ai
 | Variable | Meaning |
 | --- | --- |
 | `PORT` | listen port (default 8000) |
+| `OPEN_ACCESS` | `true` to disable token auth (LAN only — see Security notes) |
 | `ADMIN_TOKEN` | pre-set admin password instead of first-run setup |
 | `WORKSPACE_DIR` | folder the agent may read/write/run commands in |
 | `DEFAULT_MODEL` | default model id when client picks none |
@@ -81,18 +94,67 @@ docker run -d -p 8000:8000 -v agentic-data:/data agentic-ai
 ## API for your own web apps
 
 The web UI is just a client. Any other app can call the same API with
-`Authorization: Bearer <token>` (create tokens in **Settings → API tokens**):
+`Authorization: Bearer <token>`. A ready-made cheat sheet lives at
+`scripts/curl-api.sh`; full workflow with raw curl:
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"session_id":"<id>","message":"hello"}'
+BASE=http://localhost:8000
+
+# 1) first run only — set an admin password (returns the web token)
+curl -X POST $BASE/api/auth/setup -H 'Content-Type: application/json' \
+  -d '{"password":"secret"}'
+
+# 2) login (returns the web token) — or mint a dedicated API token for the app
+curl -X POST $BASE/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"password":"secret"}'
+curl -X POST $BASE/api/tokens -H "Authorization: Bearer <web-token>" \
+  -H 'Content-Type: application/json' -d '{"name":"my-app"}'   # -> {"token": "..."}
+
+TOKEN=<token from above>
+
+# 3) pick a provider/model
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/providers          # list + models
+curl -X POST $BASE/api/providers/probe -H 'Content-Type: application/json' \
+  -d '{"base_url":"https://generativelanguage.googleapis.com/v1beta/openai/"}' \
+  -H "Authorization: Bearer $TOKEN"                                 # verify a URL
+
+# 4) create a session and chat (SSE stream, one line per event)
+SID=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" $BASE/api/sessions | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+curl -N -X POST $BASE/api/chat \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"session_id\":\"$SID\",\"message\":\"list the files and summarize\",\"model\":\"gemini-3.6-flash\"}"
+#   -> data: {"type":"status","status":"thinking"}\n\n
+#      data: {"type":"tool_call","name":"list_dir","args":{...}}\n\n
+#      data: {"type":"tool_result",...}\n\n
+#      data: {"type":"text","text":"..."}\n\n
+#      data: {"type":"done","messages":2,"duration":42.3}\n\n
+
+# 5) read it back / manage files
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/sessions/$SID/messages
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/files"              # tree
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/files/content?path=notes.md"
 ```
 
-SSE event stream: `status`, `text`, `tool_call`, `tool_result`, `done`,
-`error`. Also available: `GET/POST/DELETE /api/sessions`, `GET
-/api/sessions/{id}/messages`, `GET/POST /api/files`, `GET /api/files/content`,
-`POST /api/files/write` (see `app/main.py`).
+SSE event types: `status`, `text`, `tool_call`, `tool_result`, `done`,
+`error`. Consuming the stream in a custom UI:
+
+```js
+const res = await fetch("/api/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
+  body: JSON.stringify({ session_id, message, model }),
+});
+for (const chunk of parseSSE(await res.body.getReader())) {   // see webui/assets/app.js
+  if (chunk.type === "text") render(chunk.text);
+  if (chunk.type === "done") done();
+}
+```
+
+Note: `model` is optional — omit it to use the server default. `provider_id`
+is optional too; the server picks the first provider that has a key.
+`GET/POST/DELETE /api/sessions`, `GET /api/sessions/{id}/messages`, `GET/POST
+/api/files`, `GET /api/files/content`, `POST /api/files/write`,
+`POST /api/files/mkdir` are all available (full reference: `app/main.py`).
 
 ## Security notes (self-hosting)
 

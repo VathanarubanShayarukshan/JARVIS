@@ -33,6 +33,17 @@ def default_presets() -> list[dict[str, Any]]:
             "models": ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3-0324:free"],
             "is_custom": 0,
         },
+        {
+            "name": "Hugging Face (free credits)",
+            "base_url": "https://router.huggingface.co/v1",
+            "hint": "Free: https://huggingface.co/settings/tokens — new accounts get $0.10 of serverless compute, and some models are free. The model chooser lists hundreds of models from one provider.",
+            "models": [
+                "meta-llama/Llama-3.3-70B-Instruct",
+                "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+                "Qwen/Qwen2.5-72B-Instruct",
+            ],
+            "is_custom": 0,
+        },
     ]
 
 

@@ -132,7 +132,9 @@ button:disabled { opacity: .5; cursor: default; }
   background: var(--bg2);
 }
 
-.model-select { width: 320px; max-width: 50vw; }
+.model-select { width: 340px; max-width: 55vw; }
+.model-select optgroup { color: var(--muted); font-style: normal; }
+.model-select optgroup option { color: var(--text); }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); display: inline-block; }
 .dot.ok { background: var(--accent2); }
@@ -189,35 +191,49 @@ button:disabled { opacity: .5; cursor: default; }
   opacity: .8;
 }
 
-/* tool cards */
-.tool-card {
+/* working indicator + collapsible tool log */
+.activity { margin: 4px 0 10px; font-size: 12px; }
+
+.act-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+.act-pill .spin { animation: pulse 1s infinite; }
+
+details.toolbar {
+  display: inline-block;
+  max-width: 100%;
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: 10px;
-  margin: 10px 0;
   overflow: hidden;
-  font-family: var(--mono);
-  font-size: 12.5px;
 }
 
-.tool-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
+details.toolbar summary {
   cursor: pointer;
-  user-select: none;
+  padding: 6px 12px;
   color: var(--muted);
+  user-select: none;
 }
+details.toolbar summary:hover { color: var(--text); }
+details.toolbar[open] summary { border-bottom: 1px solid var(--border); }
 
-.tool-head .name { color: var(--accent); }
-.tool-head .status { margin-left: auto; }
-.tool-head .status.running::after { content: "…"; animation: pulse 1s infinite; }
-.tool-head .status.done { color: var(--accent2); }
-.tool-head .status.error { color: var(--danger); }
+.tool-list { padding: 6px 12px 10px; display: flex; flex-direction: column; gap: 4px; }
 
-.tool-body { border-top: 1px solid var(--border); max-height: 260px; overflow: auto; padding: 10px 12px; white-space: pre-wrap; background: var(--bg); }
-.tool-body.args { color: var(--muted); }
+.tool-row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; }
+.tool-row .tname { color: var(--accent); }
+.tool-row .tstatus.ok { color: var(--accent2); }
+.tool-row .tstatus.err { color: var(--danger); }
+.tool-row .running { color: var(--muted); animation: pulse 1s infinite; }
+
+details.toolbar summary .hint { font-size: 10px; opacity: .7; }
 
 @keyframes pulse { 50% { opacity: .2; } }
 

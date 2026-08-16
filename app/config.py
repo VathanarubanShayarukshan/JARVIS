@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     default_model: str = ""
 
+    open_access: bool = False
+
     max_tool_iterations: int = 12
     max_messages: int = 60
 

@@ -50,12 +50,16 @@ def _unauthorized() -> HTTPException:
 
 
 def require_web(authorization: str | None = Header(default=None)) -> None:
+    if settings.open_access:
+        return
     token = (authorization or "").removeprefix("Bearer ").strip()
     if not token or token != _web_token():
         raise _unauthorized()
 
 
 def require_any(authorization: str | None = Header(default=None)) -> None:
+    if settings.open_access:
+        return
     if authorization is None:
         raise _unauthorized()
     token = authorization.removeprefix("Bearer ").strip()
@@ -434,7 +438,8 @@ def main() -> None:
     import uvicorn
 
     db.init_db()
-    if not settings.admin_token:
+    have_password = bool(db.get_setting("admin_password")) or bool(settings.admin_token)
+    if not have_password:
         print("=" * 60)
         print(" AgenticAI is starting. No password is configured.")
         print(" Open the web UI and set an admin password (first-time setup).")

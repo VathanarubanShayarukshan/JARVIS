@@ -11,7 +11,9 @@ Event shapes (each yielded as a dict with a "type" key):
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from typing import Any, AsyncIterator
 
 from .config import settings
@@ -20,6 +22,16 @@ from .llm import DEFAULT_SYSTEM_PROMPT, LLMClient, LLMError
 from .tools import registry
 
 MAX_TOOL_RESULT_CHARS = 12000
+RATE_LIMIT_RETRIES = 4
+
+
+def _retry_after(message: str) -> int:
+    m = re.search(r"retry\s+in\s+([\d.]+)\s*s", message, re.I)
+    if not m:
+        m = re.search(r"([\d.]+)\s*seconds?", message, re.I)
+    if m:
+        return max(5, min(int(float(m.group(1))), 60))
+    return 15
 
 
 def _tool_call_index(tc: dict[str, Any], drafts: dict[int, dict[str, Any]]) -> int:
@@ -65,23 +77,37 @@ async def run_agent(
             tool_calls: list[dict[str, Any]] = []
             drafts: dict[int, dict[str, Any]] = {}
 
-            async for delta, chunk in client.stream_chat(messages, tools=tool_configs):
-                if delta:
-                    accumulated_text += delta
-                    yield {"type": "text", "text": delta}
-                choices = chunk.get("choices") or []
-                if not choices:
-                    continue
-                for tc in (choices[0].get("delta") or {}).get("tool_calls") or []:
-                    idx = _tool_call_index(tc, drafts)
-                    acc = drafts.setdefault(
-                        idx, {"id": "", "name": "", "arguments": "", "extra_content": None}
-                    )
-                    acc["id"] += tc.get("id") or ""
-                    acc["name"] += (tc.get("function") or {}).get("name") or ""
-                    acc["arguments"] += (tc.get("function") or {}).get("arguments") or ""
-                    if acc["extra_content"] is None:
-                        acc["extra_content"] = tc.get("extra_content")
+            base_text_len = len(accumulated_text)
+            rate_retries = RATE_LIMIT_RETRIES
+            while True:
+                try:
+                    async for delta, chunk in client.stream_chat(messages, tools=tool_configs):
+                        if delta:
+                            accumulated_text += delta
+                            yield {"type": "text", "text": delta}
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        for tc in (choices[0].get("delta") or {}).get("tool_calls") or []:
+                            idx = _tool_call_index(tc, drafts)
+                            acc = drafts.setdefault(
+                                idx, {"id": "", "name": "", "arguments": "", "extra_content": None}
+                            )
+                            acc["id"] += tc.get("id") or ""
+                            acc["name"] += (tc.get("function") or {}).get("name") or ""
+                            acc["arguments"] += (tc.get("function") or {}).get("arguments") or ""
+                            if acc["extra_content"] is None:
+                                acc["extra_content"] = tc.get("extra_content")
+                    break
+                except LLMError as e:
+                    msg = str(e)
+                    is_retryable = "429" in msg or "rate" in msg.lower() or "quota" in msg.lower()
+                    if not is_retryable or rate_retries <= 0 or len(accumulated_text) != base_text_len:
+                        raise
+                    wait = _retry_after(msg)
+                    rate_retries -= 1
+                    yield {"type": "status", "message": f"Provider rate-limited; retrying in {wait}s..."}
+                    await asyncio.sleep(wait)
 
             if not drafts:
                 break

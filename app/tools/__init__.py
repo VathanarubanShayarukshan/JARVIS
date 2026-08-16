@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any, Callable
 
@@ -34,10 +35,16 @@ class Registry:
             return f"Error: unknown tool '{name}'"
         fn: Callable[..., str] = self._tools[name]["fn"]
         try:
-            result = fn(**arguments)
+            # drop kwargs the model invented (e.g. read_file(content=...));
+            # missing required ones still raise an ArgumentError below
+            allowed = {p.name for p in inspect.signature(fn).parameters.values() if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)}
+            args = {k: v for k, v in (arguments or {}).items() if k in allowed}
+            result = fn(**args)
             if isinstance(result, dict):
                 return json.dumps(result, ensure_ascii=False)
             return str(result)
+        except TypeError as e:
+            return f"Error: bad arguments for {name}: {e}\nArguments received: {json.dumps(arguments, ensure_ascii=False)}"
         except Exception as e:  # noqa: BLE001 - surface tool errors to the model
             return f"Error: {type(e).__name__}: {e}"
 

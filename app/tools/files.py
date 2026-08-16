@@ -10,10 +10,25 @@ MAX_READ_BYTES = 200_000
 
 
 def _resolve(path: str) -> Path:
-    p = (WORKSPACE / path).resolve()
-    if not p.is_relative_to(WORKSPACE):
+    """Resolve a workspace-relative path, tolerating the /workspace/ prefix and
+    absolute paths that are inside the workspace (models often emit them)."""
+    p = str(path or "").strip()
+    norm = p.replace("\\", "/")
+    if norm.startswith("/workspace"):
+        norm = norm[len("/workspace"):].lstrip("/")
+    elif norm.startswith("workspace/"):
+        norm = norm[len("workspace/"):]
+    elif norm.startswith("./"):
+        norm = norm[len("./"):]
+    p = norm.lstrip("/\\")
+    cand = Path(p)
+    if cand.is_absolute():
+        rp = cand.resolve()
+    else:
+        rp = (WORKSPACE / p).resolve()
+    if rp != WORKSPACE and not rp.is_relative_to(WORKSPACE):
         raise PermissionError(f"path {path!r} escapes the workspace")
-    return p
+    return rp
 
 
 def _tool(fn):

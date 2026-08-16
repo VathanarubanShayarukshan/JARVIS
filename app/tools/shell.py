@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -55,12 +56,27 @@ def run_command(command: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     installs, and any command-line work. Commands run via bash on Unix and
     powershell on Windows."""
     if IS_WINDOWS:
-        argv = ["powershell", "-NoProfile", "-Command", command]
+        argv = ["powershell", "-NoProfile", "-Command", _powershell_compat(command)]
     else:
         argv = ["/bin/bash", "-lc", command]
 
     proc = subprocess_run(argv, timeout=timeout)
     return _format_result(proc, command)
+
+
+def _powershell_compat(command: str) -> str:
+    """Translate a few common bash idioms into PowerShell so that models that
+    mostly target Unix don't produce a parser error on Windows hosts."""
+    c = command
+    and_count = c.count(" && ")
+    or_count = c.count(" || ")
+    c = re.sub(r"\s+&&\s+", "; if ($?) { ", c)
+    c = re.sub(r"\s+\|\|\s+", "; if (-not $?) { ", c)
+    c = c.replace(" 2>/dev/null", " 2>$null").replace(" >/dev/null", " | Out-Null")
+    c = c.replace(" 2>&1", " 2>&1")
+    if and_count or or_count:
+        c = c + ("}" * (and_count + or_count))
+    return c
 
 
 @_tool
