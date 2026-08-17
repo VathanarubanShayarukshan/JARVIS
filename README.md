@@ -166,6 +166,15 @@ is optional too; the server picks the first provider that has a key.
 - Login/API tokens are stored in the SQLite DB (`data/app.db`). API keys are
   stored plaintext there too — protect the `data/` folder.
 
+## WhatsApp bot
+
+`whatsapp/` contains a Baileys-based WhatsApp bot (Termux/Kali, Node 18+) that
+reuses all its modes (`.run` / `.send` / `.get` / `.brows`) and adds an
+**`.agent`** mode: it asks for a provider, a model (by number), and a task,
+then drives the AgenticAI API — with live status via `.pro`
+(`Thinking...`, `Running command: ...`) and long replies chunked for
+WhatsApp. See `whatsapp/README.md` for setup.
+
 ## Development / testing
 
 `scripts/stub_provider.py` is a fake OpenAI-compatible LLM that replies with a
