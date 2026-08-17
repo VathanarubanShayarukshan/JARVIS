@@ -26,6 +26,7 @@ const AGENTIC_CHAT_TIMEOUT = 300000;
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+const qrcode = require('qrcode-terminal');
 const sessions = {};
 const botMessageIds = new Set(); // லூப் பிழைகளைத் தடுக்க தனித்துவமான மெசேஜ் ஐடி டிராக்கர்
 
@@ -171,7 +172,8 @@ async function startBot() {
 
     if (!state.creds || !state.creds.registered) {
         console.clear();
-        phoneNumber = await question('👉 Enter your WhatsApp number with country code:\n');
+        console.log('Login options:\n  1) WhatsApp Web style: press Enter now and scan the QR code that prints below\n  2) Pairing code: type your WhatsApp number with country code, then enter the code in the app');
+        phoneNumber = await question('👉 Enter your WhatsApp number with country code (or just press Enter for QR login):\n');
         phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
     }
 
@@ -214,6 +216,11 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update) => {
+        if (update.qr) {
+            console.log('\n📱 SCAN THIS QR CODE (WhatsApp -> Linked Devices). It refreshes automatically if it expires:\n');
+            qrcode.generate(update.qr, { small: true });
+            return;
+        }
         if (update.connection === 'open') console.log('\n✅ System Connected Securely! Infinite Loop Shield Active.');
         if (update.connection === 'close') startBot();
     });

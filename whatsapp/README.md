@@ -11,7 +11,7 @@ mkdir -p ~/Termux && cd ~/Termux
 git clone https://github.com/VathanarubanShayarukshan/my-agentic-ai.git
 cd my-agentic-ai/whatsapp
 npm init -y
-npm i @whiskeysockets/baileys pino puppeteer
+npm i @whiskeysockets/baileys pino puppeteer qrcode-terminal
 ```
 
 ## Configure
@@ -24,9 +24,25 @@ export AGENTIC_PASSWORD=test-pass
 node index.js
 ```
 
-Enter your WhatsApp number with country code → a **pairing code** prints →
-enter it in WhatsApp → Linked Devices. If `AGENTIC_URL`/`AGENTIC_PASSWORD`
-are unset, defaults are `http://localhost:8000` / `test-pass`.
+## Login to WhatsApp (two ways)
+
+**1. Web-UI style (QR code)** — easiest, no phone number needed:
+
+- At the prompt `Enter your WhatsApp number...` just press **Enter**
+- a QR code prints in the terminal — open WhatsApp on your phone →
+  **Menu ⋮ → Linked devices → Link a device** → scan it
+- the QR auto-refreshes if it expires; scanning logs the bot in
+
+**2. Pairing code** — when you can't scan (e.g. remote box):
+
+- type your number with country code (`9477...`, no `+` or spaces)
+- a **pairing code** prints (`🔑 YOUR VALID PAIRING CODE IS: ...`)
+- in WhatsApp → **Linked devices → Link a device → Link with phone
+  number instead** → enter the code
+
+Both methods store the session in `auth_session/` — next run reconnects
+automatically. To log in as a different account, delete the `auth_session`
+folder first and restart.
 
 ## Commands
 
