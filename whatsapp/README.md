@@ -14,12 +14,26 @@ npm init -y
 npm i @whiskeysockets/baileys pino puppeteer qrcode-terminal
 ```
 
-## Configure
+## Run
+
+One command handles everything (config + deps + start):
 
 ```bash
-# where your AgenticAI server runs (localhost if it's on the same box)
+./run.sh
+```
+
+It reads `whatsapp/.env` if present (optional):
+
+```bash
+AGENTIC_URL=http://localhost:8000
+AGENTIC_PASSWORD=test-pass
+```
+
+Otherwise defaults `http://localhost:8000` / `test-pass` are used. Missing npm
+packages are installed automatically on first run. Manual alternative:
+
+```bash
 export AGENTIC_URL=http://localhost:8000
-# admin password for the AgenticAI web UI / API
 export AGENTIC_PASSWORD=test-pass
 node index.js
 ```
