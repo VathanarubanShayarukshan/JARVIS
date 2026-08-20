@@ -9,3 +9,5 @@ stub_requests.jsonl
 .git/.opencode/
 
 .opencode/
+
+termux.txt
