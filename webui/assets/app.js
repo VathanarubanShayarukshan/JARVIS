@@ -4,8 +4,11 @@ const $ = (id) => document.getElementById(id);
 const api = (path, opts = {}) => {
   const headers = Object.assign({}, opts.headers || {});
   if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  if (opts.body && typeof opts.body !== "string") headers["Content-Type"] = "application/json";
-  const finalBody = opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body;
+  let finalBody = opts.body;
+  if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+    finalBody = JSON.stringify(opts.body);
+  }
   return fetch(path, Object.assign({}, opts, { headers, body: finalBody }));
 };
 const json = async (r) => {
@@ -24,6 +27,7 @@ const state = {
   modelKey: localStorage.getItem("modelKey") || "",
   modelPrefs: JSON.parse(localStorage.getItem("modelPrefs") || "{}"),
   abort: null,
+  pendingFiles: [], // {name, file} waiting to be attached to the next message
 };
 
 const uiState = { activity: null, answer: "", toolCount: 0 };
@@ -327,15 +331,52 @@ function scrollChat() {
 async function send() {
   const input = $("input");
   const text = input.value.trim();
-  if (!text || !state.sessionId || state.busy) return;
+  const attachments = state.pendingFiles.slice();
+  if ((!text && !attachments.length) || !state.sessionId || state.busy) return;
   state.busy = true;
   $("send-btn").disabled = true;
-  appendMsg("user").body.textContent = text;
+
+  // WhatsApp-style: upload attached files to attachments/<session>/
+  let attachedPaths = [];
+  if (attachments.length) {
+    const fd = new FormData();
+    fd.append("path", "attachments/" + state.sessionId);
+    for (const a of attachments) fd.append("file", a.file, a.name);
+    try {
+      const ur = await api("/api/files/upload", { method: "POST", body: fd });
+      const uj = await ur.json().catch(() => ({}));
+      if (!ur.ok) throw new Error(uj.detail || "upload failed");
+      attachedPaths = uj.files || [];
+    } catch (e) {
+      state.pendingFiles = attachments;
+      renderAttachBar();
+      $("attach-bar").appendChild(Object.assign(document.createElement("span"), {
+        className: "att-err muted small", textContent: "upload failed: " + e.message,
+      }));
+      state.busy = false;
+      $("send-btn").disabled = false;
+      return;
+    }
+  }
+
+  const userDiv = appendMsg("user");
+  userDiv.body.textContent = text || "📎 attached " + attachments.length + " file(s)";
+  if (attachedPaths.length) {
+    const chips = document.createElement("div");
+    chips.className = "att-chips";
+    chips.innerHTML = attachedPaths.map((p) => {
+      const name = p.split("/").pop();
+      return `<a class="att-chip" href="/api/files/download?path=${encodeURIComponent(p)}" download title="${esc(p)}">${esc(name)}</a>`;
+    }).join("");
+    userDiv.div.appendChild(chips);
+  }
   input.value = "";
   input.style.height = "auto";
+  state.pendingFiles = [];
+  renderAttachBar();
   scrollChat();
 
-  const userText = text;
+  const userText = text || "Attached " + attachments.length + " file(s) — look at them and help me.";
   const { body: asBody, activity: asActivity } = appendMsg("assistant");
   uiState.activity = makeActivity(asActivity);
   uiState.answer = "";
@@ -350,6 +391,7 @@ async function send() {
         provider_id: modelProviderId(),
         model: modelId(),
         skill: $("skill-select").value || null,
+        attachments: attachedPaths,
       },
     });
     if (!r.ok) {
@@ -408,6 +450,16 @@ function handleEvent(ev, asBody) {
       if (ev.content) {
         uiState.answer = ev.content;
         asBody.innerHTML = renderMarkdown(ev.content);
+      }
+      if (ev.files && ev.files.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "out-files";
+        wrap.innerHTML = '<span class="muted small">📎 Output files:</span>' +
+          ev.files.map((p) => {
+            const name = String(p).split("/").pop();
+            return `<a class="att-chip" href="/api/files/download?path=${encodeURIComponent(p)}" download title="${esc(p)}">⬇ ${esc(name)}</a>`;
+          }).join("");
+        asBody.appendChild(wrap);
       }
       if (state.autoTitle) autoTitle();
       scrollChat();
@@ -519,6 +571,42 @@ $("auto-title").onchange = (e) => {
   state.autoTitle = e.target.checked;
   localStorage.setItem("autoTitle", e.target.checked ? "1" : "0");
 };
+
+/* ---- WhatsApp-style attachments ---- */
+
+$("attach-btn").onclick = () => $("attach-input").click();
+$("attach-input").onchange = () => {
+  for (const f of $("attach-input").files) {
+    state.pendingFiles.push({ name: f.name, file: f });
+  }
+  $("attach-input").value = "";
+  renderAttachBar();
+};
+
+function renderAttachBar() {
+  const bar = $("attach-bar");
+  bar.innerHTML = "";
+  if (!state.pendingFiles.length) {
+    bar.classList.add("hidden");
+    return;
+  }
+  bar.classList.remove("hidden");
+  for (let i = 0; i < state.pendingFiles.length; i++) {
+    const chip = document.createElement("span");
+    chip.className = "att-chip pending";
+    chip.innerHTML = `📎 ${esc(state.pendingFiles[i].name)}`;
+    const rm = document.createElement("button");
+    rm.className = "att-rm";
+    rm.textContent = "✕";
+    rm.title = "Remove";
+    rm.onclick = () => {
+      state.pendingFiles.splice(i, 1);
+      renderAttachBar();
+    };
+    chip.appendChild(rm);
+    bar.appendChild(chip);
+  }
+}
 
 /* ---------------- settings modal ---------------- */
 

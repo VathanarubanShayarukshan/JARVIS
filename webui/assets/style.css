@@ -338,6 +338,40 @@ details.toolbar summary .hint { font-size: 10px; opacity: .7; }
 .composer textarea:focus { box-shadow: none; background: none; }
 
 .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 10px; }
+.composer-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.attach-btn { padding: 6px 10px; font-size: 15px; border-radius: 8px; }
+.attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 14px 0;
+}
+.attach-bar .att-err { flex-basis: 100%; }
+
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg3);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 18px;
+  padding: 3px 11px;
+  font-size: 12px;
+  font-family: var(--mono);
+  text-decoration: none;
+  vertical-align: middle;
+}
+.att-chip:hover { filter: brightness(1.15); }
+.att-chip.pending { border-color: var(--border); color: var(--muted); }
+.att-rm { border: none; background: none; color: var(--danger); padding: 0 2px; font-size: 11px; cursor: pointer; }
+
+.att-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.msg.user .att-chips { justify-content: flex-end; }
+
+.out-files { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+
 .hint { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .hint input { width: auto; accent-color: var(--accent); }
 .composer-note { max-width: 880px; margin: 8px auto 0; font-size: 11px; text-align: center; }

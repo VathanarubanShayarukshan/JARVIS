@@ -69,6 +69,7 @@ async def run_agent(
     client = LLMClient(provider, model)
     accumulated_text = ""
     tool_configs = registry.tool_configs()
+    output_files: list[str] = []
 
     try:
         for _ in range(min(settings.max_tool_iterations, 48)):
@@ -133,6 +134,8 @@ async def run_agent(
                 except json.JSONDecodeError:
                     args = {}
                 yield {"type": "tool_call", "id": call_id, "name": tc["name"], "arguments": args}
+                if tc["name"] == "write_file" and args.get("path"):
+                    output_files.append(str(args["path"]))
                 result = registry.call(tc["name"], args)
                 if len(result) > MAX_TOOL_RESULT_CHARS:
                     result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[truncated]"
@@ -147,7 +150,15 @@ async def run_agent(
             yield {"type": "text", "text": accumulated_text}
 
         append_message(session_id, "assistant", accumulated_text)
-        yield {"type": "done", "content": accumulated_text}
+        files = []
+        for p in dict.fromkeys(output_files):
+            try:
+                p2 = (settings.workspace / p.lstrip("/\\")).resolve()
+                if p2.is_relative_to(settings.workspace) and p2.is_file():
+                    files.append(str(p2.relative_to(settings.workspace)).replace("\\", "/"))
+            except OSError:
+                continue
+        yield {"type": "done", "content": accumulated_text, "files": files}
     except LLMError as e:
         yield {"type": "error", "message": str(e)}
     except Exception as e:  # noqa: BLE001

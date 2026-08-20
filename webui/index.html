@@ -64,11 +64,16 @@
 
     <div class="composer-wrap">
       <div class="composer">
-        <textarea id="input" rows="1" placeholder="Ask anything — the agent can read/write files, run commands and search the web…"></textarea>
+        <div id="attach-bar" class="attach-bar hidden"></div>
+        <textarea id="input" rows="1" placeholder="Ask anything — attach files, and download what the agent creates…"></textarea>
         <div class="composer-foot">
-          <label class="hint">
-            <input type="checkbox" id="auto-title"> auto-title chats
-          </label>
+          <div class="composer-left">
+            <input type="file" id="attach-input" class="file-input" multiple>
+            <button id="attach-btn" class="ghost attach-btn" title="Attach files (like WhatsApp)">📎</button>
+            <label class="hint">
+              <input type="checkbox" id="auto-title"> auto-title chats
+            </label>
+          </div>
           <button id="send-btn" class="primary send">Send ↵</button>
         </div>
       </div>

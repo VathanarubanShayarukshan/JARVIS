@@ -320,6 +320,13 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     skill_id = str(body.get("skill") or "").strip()
     skill_body = load_skill(skill_id) if skill_id else None
 
+    attach = body.get("attachments") or []
+    attach = [str(a).strip() for a in attach if str(a).strip()]
+    if attach:
+        message = ("The user attached these files (read them with the read_file tool as needed):\n"
+                   + "\n".join(f"- {a}" for a in attach)
+                   + "\n\n---\n\nTask:\n" + message)
+
     async def stream():
         try:
             effective = message
@@ -433,8 +440,7 @@ def file_mkdir(body: dict[str, Any]) -> dict[str, str]:
 async def file_upload(request: Request) -> dict[str, Any]:
     form = await request.form()
     target = _fs_resolve(str(form.get("path") or ""))
-    if not target.is_dir():
-        raise HTTPException(status_code=400, detail="upload path is not a directory")
+    target.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
     for part in form.getlist("file"):
         name = Path(getattr(part, "filename", None) or "file").name
