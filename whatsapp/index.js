@@ -13,6 +13,19 @@ const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 
+// Bridge mode: BRIDGE_PORT set -> serve the login QR/status over HTTP so the
+// AgenticAI web app can show the login QR (Settings -> Bots).
+const BRIDGE_PORT = parseInt(process.env.BRIDGE_PORT || '', 10) || null;
+const bridge = { qr: null, state: 'starting', user: null, events: [], pairCode: null, pairNumber: null };
+let sock = null;
+
+function evt(msg) {
+    const line = String(msg);
+    bridge.events.push(line.length > 120 ? line.slice(0, 120) : line);
+    if (bridge.events.length > 40) bridge.events.shift();
+    if (BRIDGE_PORT) console.log('[bridge]', line);
+}
+
 // ============================================================
 // AgenticAI integration config
 //   AGENTIC_URL      -> your AgenticAI server (default localhost:8000)
@@ -171,14 +184,18 @@ async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_session');
 
     if (!state.creds || !state.creds.registered) {
-        console.clear();
-        console.log('Login options:\n  1) WhatsApp Web style: press Enter now and scan the QR code that prints below\n  2) Pairing code: type your WhatsApp number with country code, then enter the code in the app');
-        phoneNumber = await question('👉 Enter your WhatsApp number with country code (or just press Enter for QR login):\n');
-        phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+        if (!BRIDGE_PORT) {
+            console.clear();
+            console.log('Login options:\n  1) WhatsApp Web style: press Enter now and scan the QR code that prints below\n  2) Pairing code: type your WhatsApp number with country code, then enter the code in the app');
+            phoneNumber = await question('👉 Enter your WhatsApp number with country code (or just press Enter for QR login):\n');
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+        } else {
+            console.log('[bridge] Waiting for QR scan (see the web app: Settings -> Bots)');
+        }
     }
 
     const { version } = await fetchLatestBaileysVersion();
-    const sock = makeWASocket({
+    sock = makeWASocket({
         version,
         auth: state,
         logger: pino({ level: 'silent' }),
@@ -216,9 +233,26 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update) => {
+        if (BRIDGE_PORT) {
+            bridge.state = update.connection || bridge.state;
+            if (sock.user) bridge.user = sock.user.id || null;
+            if (update.connection === 'open') {
+                bridge.qr = null;
+                bridge.pairCode = null;
+                evt('Connected. Bot ready (use .agent, .run, ... in WhatsApp).');
+            }
+        }
         if (update.qr) {
             console.log('\n📱 SCAN THIS QR CODE (WhatsApp -> Linked Devices). It refreshes automatically if it expires:\n');
             qrcode.generate(update.qr, { small: true });
+            if (BRIDGE_PORT) {
+                evt('New login QR generated — scan it in the web app or on the terminal.');
+                try {
+                    require('qrcode').toDataURL(update.qr, { errorCorrectionLevel: 'L', margin: 1, width: 260 }, (err, url) => {
+                        bridge.qr = err ? null : url;
+                    });
+                } catch (e) { /* qrcode lib missing -> CLI only */ }
+            }
             return;
         }
         if (update.connection === 'open') console.log('\n✅ System Connected Securely! Infinite Loop Shield Active.');
@@ -743,3 +777,66 @@ async function startBot() {
     });
 }
 startBot();
+
+// Bridge HTTP server (used by the web app: Settings -> Bots -> WhatsApp)
+if (BRIDGE_PORT) {
+    const http = require('http');
+    http.createServer(async (req, res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        const url = (req.url || '/').split('?')[0];
+        try {
+            if (url === '/status') {
+                res.setHeader('Content-Type', 'application/json');
+                return res.end(JSON.stringify({
+                    ok: true,
+                    state: bridge.state,
+                    connected: bridge.state === 'open',
+                    user: bridge.user,
+                    qr: bridge.qr,
+                    pairCode: bridge.pairCode,
+                    pairNumber: bridge.pairNumber,
+                    events: bridge.events,
+                }));
+            }
+            if (url === '/pair') {
+                let body = '';
+                req.on('data', (c) => { body += c; });
+                return req.on('end', async () => {
+                    let num = '';
+                    try { num = String(JSON.parse(body || '{}').number || '').replace(/[^0-9]/g, ''); } catch (e) {}
+                    res.setHeader('Content-Type', 'application/json');
+                    if (!num) return res.end(JSON.stringify({ ok: false, error: 'number required' }));
+                    try {
+                        if (sock && sock.authState && sock.authState.creds.registered) {
+                            return res.end(JSON.stringify({ ok: true, code: null, message: 'already logged in' }));
+                        }
+                        const code = await sock.requestPairingCode(num);
+                        bridge.pairCode = code;
+                        bridge.pairNumber = num;
+                        evt(`Pairing code for +${num}: ${code}`);
+                        return res.end(JSON.stringify({ ok: true, code }));
+                    } catch (e) {
+                        return res.end(JSON.stringify({ ok: false, error: e.message }));
+                    }
+                });
+            }
+            if (url === '/logout') {
+                try { await sock.logout(); } catch (e) {}
+                bridge.qr = null;
+                bridge.state = 'logged-out';
+                res.setHeader('Content-Type', 'application/json');
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            res.statusCode = 404;
+            return res.end('{}');
+        } catch (e) {
+            res.statusCode = 500;
+            return res.end(JSON.stringify({ error: e.message }));
+        }
+    }).listen(BRIDGE_PORT, () => {
+        console.log(`[bridge] WhatsApp bridge on http://127.0.0.1:${BRIDGE_PORT} (web app: Settings -> Bots)`);
+    });
+}

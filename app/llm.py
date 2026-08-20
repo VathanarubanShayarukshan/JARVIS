@@ -122,6 +122,11 @@ class LLMClient:
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """Yield (delta_text, accumulated_dict) per stream fragment."""
+        if self.provider.base_url == "builtin://tiny":
+            from .tinyml import tiny_answer
+
+            yield tiny_answer(messages), {"choices": [{"delta": {}}]}
+            return
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,

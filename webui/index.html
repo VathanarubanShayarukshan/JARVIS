@@ -55,6 +55,13 @@
         <span class="skill-hint-vbar"></span>
       </div>
       <div class="topbar-right">
+        <select id="voice-lang" class="voice-lang hidden" title="Voice language">
+          <option value="en-US">English</option>
+          <option value="en-IN">English (Tamil accented)</option>
+          <option value="ta-IN">Tamil</option>
+          <option value="hi-IN">Hindi</option>
+        </select>
+        <button id="voice-btn" class="voice-btn ghost" title="Voice chat — speak, then say .over (walkie-talkie mode)">🎤</button>
         <select id="model-select" title="Model" class="model-select"></select>
         <span id="online-dot" class="dot" title="connection"></span>
       </div>
@@ -70,11 +77,13 @@
           <div class="composer-left">
             <input type="file" id="attach-input" class="file-input" multiple>
             <button id="attach-btn" class="ghost attach-btn" title="Attach files (like WhatsApp)">📎</button>
+            <span id="voice-status" class="voice-status hidden"></span>
             <label class="hint">
               <input type="checkbox" id="auto-title"> auto-title chats
             </label>
           </div>
           <button id="send-btn" class="primary send">Send ↵</button>
+          <button id="stop-btn" class="stop hidden" title="Stop the current task" disabled>⏹ Stop</button>
         </div>
       </div>
       <p class="composer-note muted">Work happens in the server workspace: <span id="ws-path"></span></p>
@@ -93,6 +102,7 @@
         <button class="tab" data-tab="tokens">API tokens</button>
         <button class="tab" data-tab="account">Account</button>
         <button class="tab" data-tab="files">Files</button>
+        <button class="tab" data-tab="bots">Bots</button>
       </div>
 
       <div class="tab-panel" id="tab-models">
@@ -155,6 +165,32 @@
             </div>
           </div>
         </div>
+      </div>
+    <div class="tab-panel hidden" id="tab-bots">
+        <h3 style="margin:0 0 6px">Telegram bot (via BotFather)</h3>
+        <p class="muted small" id="tg-desc">Make a bot with <b>@BotFather</b> on Telegram: send <code>/newbot</code>, copy the token, paste it here and enable.</p>
+        <div class="row">
+          <input id="tg-token" type="password" placeholder="123456:ABC-DEF… (token from BotFather)">
+          <button id="tg-save" class="primary">Save + enable</button>
+        </div>
+        <label class="hint" style="margin:8px 0">
+          <input type="checkbox" id="tg-enabled"> bot enabled (runs on this server, polls Telegram)
+        </label>
+        <p id="tg-status" class="muted small"></p>
+        <p class="muted small">Commands in Telegram: <code>/agent &lt;task&gt;</code>, <code>/providers</code>, <code>/new</code>, <code>/stop</code>, <code>/help</code> — or just type a task. It uses the same agent/sessions as this web app.</p>
+
+        <hr>
+        <h3 style="margin:8px 0 6px">WhatsApp bot</h3>
+        <p class="muted small">Start the bridge once: <code>bash whatsapp/run.sh bridge</code> (reads <code>whatsapp/.env</code>). Then the QR appears here — scan with <b>WhatsApp → Linked devices</b>.</p>
+        <p id="wa-status" class="muted small">status: checking…</p>
+        <div id="wa-qr-box" class="qr-box hidden"><img id="wa-qr" alt="WhatsApp login QR"></div>
+        <div class="row" style="margin-top:8px">
+          <input id="wa-number" placeholder="WhatsApp number with country code, e.g. 919876543210">
+          <button id="wa-pair-btn">Get pairing code</button>
+        </div>
+        <p id="wa-pair-out" class="muted small"></p>
+        <pre id="wa-log" class="wa-log muted small">no bridge output yet</pre>
+        <p class="muted small">Modes on WhatsApp: <code>.agent</code>, <code>.run</code>, <code>.send</code>, <code>.get</code>, <code>.brows</code>, <code>.pro</code>, <code>.kill</code> — see <code>whatsapp/README.md</code>.</p>
       </div>
     </div>
   </div>

@@ -44,6 +44,35 @@ def default_presets() -> list[dict[str, Any]]:
             ],
             "is_custom": 0,
         },
+        {
+            "name": "OpenCode Zen (free)",
+            "base_url": "https://opencode.ai/zen/v1",
+            "hint": "Free API key: https://opencode.ai/auth (no card required for free models). Probe fetches the full free list.",
+            "models": [
+                "deepseek-v4-flash-free",
+                "nemotron-3-ultra-free",
+                "mimo-v2.5-free",
+                "big-pickle",
+                "qwen3.6-plus-free",
+                "minimax-m3-free",
+                "north-mini-code-free",
+            ],
+            "is_custom": 0,
+        },
+        {
+            "name": "Ollama (local, no key)",
+            "base_url": "http://localhost:11434/v1",
+            "hint": "Local: install Ollama from https://ollama.com then `ollama pull llama3.2` — runs on your machine with no API key, no GPU needed for small models.",
+            "models": ["llama3.2:1b", "qwen2.5:0.5b", "phi3:mini"],
+            "is_custom": 0,
+        },
+        {
+            "name": "TinyAI (built-in, instant)",
+            "base_url": "builtin://tiny",
+            "hint": "Zero-install local model: no network, no key, no GPU. Answers everyday phrases (English/Tamil) and simple math; select model tiny-answer-bot. Great for tests and light use.",
+            "models": ["tiny-answer-bot"],
+            "is_custom": 0,
+        },
     ]
 
 

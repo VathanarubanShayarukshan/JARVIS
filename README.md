@@ -32,17 +32,20 @@ locally (needs lots of CPU/GPU/RAM). AgenticAI fixes that:
 
 - Built-in web UI: chat, session history, streaming replies, tool activity cards,
   **file upload/download**, **skills** (Code Review, Explain, Build & Fix…),
-  suggestion chips, responsive design
+  **voice chat (walkie-talkie mode)**, suggestion chips, responsive design
 - Agent loop with tool calling: read/write/edit files, run shell commands,
   search the web, fetch pages — all inside a sandboxed workspace folder
 - Skills: drop any `skills/*.md` instruction pack in; pick it in the UI or
   via `"skill"` in the API (see `docs/SKILLS.md`)
+- **TinyAI built-in local model** (`builtin://tiny`): zero-install, no network,
+  English + Tamil, simple math — plus optional **Ollama** local LLM support
 - API + admin UI: providers (any OpenAI-compatible endpoint), API tokens for
   external tools/web apps, workspace file browser/editor, change password
 - Everything persisted in SQLite; zero external dependencies beyond the LLM API
 - Single-process deploy: `python -m app.main`, `./agentic.sh`, or Docker
 
-Docs: `docs/GETTING_STARTED.md`, `docs/API.md`, `docs/SKILLS.md`.
+Docs: `docs/GETTING_STARTED.md`, `docs/API.md`, `docs/SKILLS.md`,
+`docs/OPENCODE.md` (free key), `docs/VOICE.md`, `docs/TINY_LOCAL.md`.
 WhatsApp bot: `whatsapp/` (`.agent` mode drives this API from chat).
 
 ## Quick start (self-host)
@@ -79,6 +82,10 @@ password. Then go to **Settings → Models** and paste a free key:
 | Groq | https://console.groq.com/keys | `llama-3.3-70b-versatile` |
 | OpenRouter | https://openrouter.ai/settings/keys | models ending in `:free` |
 | Hugging Face | https://huggingface.co/settings/tokens | free models via `router.huggingface.co` |
+| OpenCode Zen | https://opencode.ai/auth | `deepseek-v4-flash-free`, `qwen3.6-plus-free`, … (see `docs/OPENCODE.md`) |
+
+Not connected yet? TinyAI (built-in) and Ollama (local) work with **no key**
+at all — see `docs/TINY_LOCAL.md`.
 
 Click **Check connectivity**, then **Set key** on the provider row. Pick the
 model in the top-right dropdown and start chatting. That's it — every other

@@ -13,7 +13,7 @@ if [ ! -f package.json ]; then
 fi
 
 echo "==> Checking dependencies"
-npm install --no-audit --no-fund --silent @whiskeysockets/baileys pino puppeteer qrcode-terminal
+npm install --no-audit --no-fund --silent @whiskeysockets/baileys pino puppeteer qrcode-terminal qrcode
 
 if [ -f .env ]; then
   set -a
@@ -25,6 +25,13 @@ fi
 export AGENTIC_URL="${AGENTIC_URL:-http://localhost:8000}"
 export AGENTIC_PASSWORD="${AGENTIC_PASSWORD:-test-pass}"
 
-echo "==> AgenticAI server: ${AGENTIC_URL}"
-echo "==> Starting WhatsApp bot (press Enter at the prompt for QR login)"
-node index.js
+MODE="${1:-cli}"
+if [ "$MODE" = "bridge" ]; then
+  echo "==> Starting WhatsApp bridge on :9511 (login QR shows in the web app: Settings -> Bots)"
+  export BRIDGE_PORT="${BRIDGE_PORT:-9511}"
+  node index.js
+else
+  echo "==> AgenticAI server: ${AGENTIC_URL}"
+  echo "==> Starting WhatsApp bot (press Enter at the prompt for QR login)"
+  node index.js
+fi

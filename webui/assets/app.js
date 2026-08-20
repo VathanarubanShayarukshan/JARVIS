@@ -27,6 +27,7 @@ const state = {
   modelKey: localStorage.getItem("modelKey") || "",
   modelPrefs: JSON.parse(localStorage.getItem("modelPrefs") || "{}"),
   abort: null,
+  ctrl: null,
   pendingFiles: [], // {name, file} waiting to be attached to the next message
 };
 
@@ -264,12 +265,23 @@ function appendMsg(role) {
 }
 
 /* compact "working" indicator + collapsible tool log (hidden by default) */
+function fmtArgs(args) {
+  if (args == null) return "";
+  if (typeof args === "string") return args;
+  try { return JSON.stringify(args, null, 1); } catch { return String(args); }
+}
 function makeActivity(activity) {
   const pill = document.createElement("div");
   pill.className = "act-pill";
   pill.innerHTML = '<span class="spin">⚙</span><span class="txt">working…</span>';
   activity.appendChild(pill);
   activity.classList.remove("hidden");
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.className = "details-toggle hidden";
+  toggleBtn.textContent = "⚙ expand tool details";
+  toggleBtn.title = "Show/hide what tools ran and what commands they executed";
+  activity.appendChild(toggleBtn);
 
   const toolbar = document.createElement("details");
   toolbar.className = "toolbar";
@@ -282,6 +294,15 @@ function makeActivity(activity) {
   activity.appendChild(toolbar);
   let rows = [];
 
+  function refreshToggle() {
+    const open = rows.every((r) => r.row.classList.contains("details-open"));
+    toggleBtn.textContent = open && rows.length ? "⚙ collapse tool details" : "⚙ expand tool details";
+  }
+  toggleBtn.onclick = () => {
+    rows.forEach((r) => r.row.classList.toggle("details-open"));
+    refreshToggle();
+  };
+
   return {
     status: (txt) => {
       if (toolbar.hidden) {
@@ -290,24 +311,38 @@ function makeActivity(activity) {
       }
     },
     dismiss: () => pill.hidden = true,
-    addTool: (name) => {
+    addTool: (name, args) => {
       pill.hidden = false;
-      pill.querySelector(".txt").textContent = "using " + name + "…";
+      pill.querySelector(".txt").textContent = "running " + name + "…";
       const row = document.createElement("div");
       row.className = "tool-row";
-      row.innerHTML = `<span class="spin">⚙</span><span class="tname">${esc(name)}</span><span class="running">…</span>`;
+      const argText = fmtArgs(args);
+      row.innerHTML =
+        `<span class="tname">⚙ ${esc(name)}</span><span class="running">…</span>` +
+        `<div class="tool-details">` +
+        (argText ? `<div class="d-label">input</div><pre>${esc(argText)}</pre>` : "") +
+        `<div class="d-label">result</div><pre class="t-result">…</pre>` +
+        `</div>`;
+      row.onclick = () => {
+        row.classList.toggle("details-open");
+        refreshToggle();
+      };
       list.appendChild(row);
-      rows.push(row);
+      rows.push({ row, result: row.querySelector(".t-result") });
       toolbar.hidden = false;
       toolbar.open = false;
+      toggleBtn.classList.remove("hidden");
+      refreshToggle();
     },
-    toolDone: (name, ok) => {
-      const row = rows[rows.length - 1];
-      if (row) {
-        const s = row.querySelector(".running");
+    toolDone: (name, ok, result) => {
+      const r = rows[rows.length - 1];
+      if (r) {
+        const s = r.row.querySelector(".running");
         s.textContent = ok ? "done" : "error";
         s.className = ok ? "tstatus ok" : "tstatus err";
-        row.querySelector(".spin").textContent = ok ? "✓" : "✕";
+        const res = String(result ?? "");
+        r.result.textContent = res.length > 600 ? res.slice(0, 600) + "\n…(truncated)" : res;
+        r.row.querySelector(".tname").textContent = (ok ? "✓" : "✕") + " " + name;
       }
       pill.hidden = true;
     },
@@ -316,7 +351,8 @@ function makeActivity(activity) {
       toolbar.hidden = false;
       toolbar.open = false;
       const c = rows.length;
-      summary.innerHTML = `⚙ ${c} tool call${c === 1 ? "" : "s"}` + (c ? ` <span class="hint">— tap to view</span>` : "");
+      summary.innerHTML = `⚙ ${c} tool call${c === 1 ? "" : "s"} <span class="hint">— tap title, or the button above, to view inputs/outputs (commands that ran)</span>`;
+      refreshToggle();
     },
     rows,
   };
@@ -382,9 +418,16 @@ async function send() {
   uiState.answer = "";
   uiState.toolCount = 0;
 
+  const ctrl = new AbortController();
+  state.ctrl = ctrl;
+  const stopBtn = $("stop-btn");
+  stopBtn.classList.remove("hidden");
+  stopBtn.disabled = false;
+
   try {
     const r = await api("/api/chat", {
       method: "POST",
+      signal: ctrl.signal,
       body: {
         session_id: state.sessionId,
         message: userText,
@@ -417,13 +460,23 @@ async function send() {
       }
     }
   } catch (e) {
-    asBody.innerHTML = `<span class="error">Error: ${esc(e.message)}</span>`;
+    if (ctrl.signal.aborted) {
+      asBody.innerHTML = `<span class="error">⏹ Stopped by you.</span>`;
+      uiState.activity && uiState.activity.finish && uiState.activity.finish();
+    } else {
+      asBody.innerHTML = `<span class="error">Error: ${esc(e.message)}</span>`;
+    }
   } finally {
     state.busy = false;
+    state.ctrl = null;
+    stopBtn.classList.add("hidden");
+    stopBtn.disabled = true;
     $("send-btn").disabled = false;
     $("input").focus();
   }
 }
+
+$("stop-btn").onclick = () => { if (state.ctrl) { state.ctrl.abort(); state.ctrl = null; } };
 
 function handleEvent(ev, asBody) {
   const a = uiState.activity;
@@ -439,17 +492,18 @@ function handleEvent(ev, asBody) {
       break;
     case "tool_call":
       uiState.toolCount++;
-      a.addTool(ev.name);
+      a.addTool(ev.name, ev.arguments);
       scrollChat();
       break;
     case "tool_result":
-      a.toolDone(ev.name, !String(ev.result).startsWith("Error"));
+      a.toolDone(ev.name, !String(ev.result).startsWith("Error"), ev.result);
       break;
     case "done":
       a.finish();
       if (ev.content) {
         uiState.answer = ev.content;
         asBody.innerHTML = renderMarkdown(ev.content);
+        Voice.speakReply(ev.content);
       }
       if (ev.files && ev.files.length) {
         const wrap = document.createElement("div");
@@ -467,6 +521,7 @@ function handleEvent(ev, asBody) {
     case "error":
       a.finish();
       asBody.innerHTML = `<span class="error">${esc(ev.message)}</span>`;
+      Voice.speakReply("Error: " + ev.message);
       scrollChat();
       break;
   }
@@ -508,11 +563,11 @@ async function loadProviders() {
   const sel = $("model-select");
   sel.innerHTML = "";
   for (const p of state.providers) {
-    if (!p.api_key_set && !p.local) continue;
+    if (!p.api_key_set && !p.local && !(p.base_url || "").startsWith("builtin:")) continue;
     const models = (Array.isArray(p.models) ? p.models : []).slice(0, 300);
     if (!models.length) continue;
     const og = document.createElement("optgroup");
-    og.label = p.name + (p.local ? " (local)" : "");
+    og.label = p.name + ((p.base_url || "").startsWith("builtin:") ? " (built-in)" : p.local ? " (local)" : "");
     for (const m of models) {
       const o = document.createElement("option");
       o.value = p.id + "|" + m;
@@ -608,18 +663,276 @@ function renderAttachBar() {
   }
 }
 
+/* ---- Voice chat: speak -> ".over" -> agent speaks -> "over" -> listen again ---- */
+
+const Voice = (() => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  let on = false;
+  let speaking = false;
+  let processing = false;
+  let buffer = [];
+  let restartTimer = null;
+
+  const statusEl = () => $("voice-status");
+  const setStatus = (txt, cls) => {
+    const el = statusEl();
+    el.textContent = txt || "";
+    el.className = "voice-status" + (cls ? " " + cls : "") + (!txt ? " hidden" : "");
+  };
+
+  function cancelAll() {
+    if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+    if (rec) { try { rec.onresult = null; rec.onerror = null; rec.onend = null; rec.stop(); } catch (e) {} rec = null; }
+    if (speechSynthesis) speechSynthesis.cancel();
+  }
+
+  function startListening() {
+    if (!on || speaking) return;
+    if (!SR) { setStatus("voice unsupported in this browser", "on"); return; }
+    try { rec = new SR(); } catch (e) { setStatus("voice unavailable", "on"); return; }
+    rec.lang = $("voice-lang").value;
+    rec.continuous = true;
+    rec.interimResults = true;
+    let lastInterim = "";
+    rec.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        const t = r[0].transcript.trim();
+        if (r.isFinal) {
+          buffer.push(t);
+          const joined = buffer.join(" ").trim();
+          const m = joined.match(/(?:^|\s)[.\s]*over\s*\.?\s*$/i);
+          if (m) {
+            processing = true;
+            if (rec) { try { rec.stop(); } catch (e) {} }
+            const withoutOver = joined.replace(/\s*\.\s*over\s*\.?\s*$/i, "").trim();
+            buffer = [];
+            if (withoutOver) sendVoice(withoutOver);
+            else {
+              processing = false;
+              setStatus("Listening… say .over when done", "");
+            }
+            return;
+          }
+        } else {
+          interim = t;
+        }
+      }
+      const shown = buffer.join(" ") + (interim ? " " + interim : "");
+      setStatus(shown ? `“${shown}”` : "Listening… say .over when done", "on");
+      lastInterim = shown;
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        setStatus("mic blocked — allow the browser mic permission", "on");
+      } else if (ev.error === "no-speech") {
+        // silent mic: keep it simple, restart shortly
+      }
+      if (on) restartListening(1200);
+    };
+    rec.onend = () => {
+      if (on && !speaking && !processing) restartListening(300);
+    };
+    try { rec.start(); setStatus("Listening… say .over when done", "on"); } catch (e) {
+      setStatus("could not start mic", "on");
+    }
+  }
+
+  function restartListening(ms) {
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = setTimeout(startListening, ms);
+  }
+
+  function sendVoice(text) {
+    const input = $("input");
+    input.value = text;
+    send(); // existing send() runs the agent; on done we speak
+  }
+
+  function speak(text, then) {
+    if (!on) { if (then) then(); return; }
+    if (!("speechSynthesis" in window)) { if (then) then(); return; }
+    speaking = true;
+    const plain = String(text || "")
+      .replace(/```[\s\S]*?```/g, " code block. ")
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/[*_#>\[\]()#|]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const chunks = plain.match(/[\s\S]{1,180}(\s|$)/g) || [plain];
+    const utter = (i) => {
+      if (!on) { cancelAll(); speaking = false; if (then) then(); return; }
+      if (!plain) { speechSay("over"); return; }
+      if (i >= chunks.length) {
+        speechSay("over");
+        return;
+      }
+      const u = new SpeechSynthesisUtterance(chunks[i]);
+      const pick = speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith($("voice-lang").value.slice(0, 2)));
+      if (pick) u.voice = pick;
+      u.lang = $("voice-lang").value;
+      u.rate = 1.02;
+      u.onend = () => utter(i + 1);
+      u.onerror = () => utter(i + 1);
+      speechSynthesis.speak(u);
+    };
+    const speechSay = (word) => {
+      const u = new SpeechSynthesisUtterance(word);
+      const pick = speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith($("voice-lang").value.slice(0, 2)));
+      if (pick) u.voice = pick;
+      u.lang = $("voice-lang").value;
+      u.onend = () => { speaking = false; if (then) then(); };
+      u.onerror = () => { speaking = false; if (then) then(); };
+      speechSynthesis.speak(u);
+    };
+    utter(0);
+  }
+
+  return {
+    get on() { return on; },
+    toggle: () => {
+      on = !on;
+      $("voice-btn").classList.toggle("on", on);
+      $("voice-lang").classList.toggle("hidden", !on);
+      if (on) {
+        buffer = [];
+        setStatus("Listening… say .over when done", "on");
+        startListening();
+      } else {
+        cancelAll();
+        speaking = false;
+        setStatus("", "");
+      }
+    },
+    stop: () => { if (rec) { try { rec.stop(); } catch (e) {} } },
+    restart: () => { if (on && !speaking) startListening(); },
+    speakReply: (text) => {
+      if (!on) return;
+      processing = false;
+      setStatus("Agent speaking… (mic off — playback noise is NOT recorded)", "speak");
+      speak(text, () => {
+        if (on) {
+          setStatus("Listening… say .over when done", "on");
+          startListening();
+        }
+      });
+    },
+  };
+})();
+
+$("voice-btn").onclick = () => Voice.toggle();
+$("voice-lang").onchange = () => { if (Voice.on) { Voice.stop(); setTimeout(() => Voice.restart(), 250); } };
+
 /* ---------------- settings modal ---------------- */
 
 $("settings-btn").onclick = openSettings;
-$("settings-close").onclick = () => $("settings-modal").classList.add("hidden");
+$("settings-close").onclick = () => { stopBotPoll(); $("settings-modal").classList.add("hidden"); };
 document.querySelectorAll(".tab").forEach((t) =>
   t.onclick = () => {
     document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.add("hidden"));
     $("tab-" + t.dataset.tab).classList.remove("hidden");
     if (t.dataset.tab === "files") loadFileTree();
+    if (t.dataset.tab === "bots") loadIntegrations();
   }
 );
+
+/* ---------------- integrations: Telegram + WhatsApp ---------------- */
+
+let botPollTimer = null;
+
+function stopBotPoll() {
+  if (botPollTimer) { clearTimeout(botPollTimer); botPollTimer = null; }
+}
+
+function renderWhatsApp(wa) {
+  const box = $("wa-qr-box");
+  const img = $("wa-qr");
+  const pairOut = $("wa-pair-out");
+  if (wa.connected) {
+    $("wa-status").textContent = "Connected" + (wa.user ? " as " + wa.user.replace(/:\d+$/, "") : "") + " — bot ready. Messages like .agent work now.";
+    box.classList.add("hidden");
+    pairOut.textContent = "";
+  } else if (wa.qr) {
+    img.src = wa.qr;
+    box.classList.remove("hidden");
+    $("wa-status").textContent = "Bridge running (" + (wa.state || "connecting") + "). Scan the QR with WhatsApp → Linked devices (refresh timer: 2s).";
+  } else if (wa.bridge_up) {
+    box.classList.add("hidden");
+    $("wa-status").textContent = "Bridge up, waiting for QR… (" + (wa.state || "connecting") + ")";
+  } else {
+    box.classList.add("hidden");
+    $("wa-status").textContent = "Bridge offline. Start it on the server: bash whatsapp/run.sh bridge";
+  }
+  if (wa.pairCode) {
+    pairOut.textContent = "🔑 Pairing code: " + wa.pairCode + " — enter it in WhatsApp → Settings → Linked devices → Link with a phone number.";
+  }
+  if (wa.events && wa.events.length) {
+    const log = $("wa-log");
+    log.textContent = wa.events.join("\n");
+  }
+}
+
+$("wa-pair-btn").onclick = async () => {
+  const num = $("wa-number").value.trim();
+  if (!/^\d{6,14}$/.test(num)) {
+    $("wa-pair-out").textContent = "Enter the number with country code (digits only), e.g. 919876543210.";
+    return;
+  }
+  $("wa-pair-out").textContent = "requesting pairing code…";
+  const r = await api("/api/integrations/whatsapp/pair", {
+    method: "POST",
+    body: { number: num },
+  }).catch(() => null);
+  const j = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok || j.ok !== true) {
+    $("wa-pair-out").textContent = "error: " + (j.error || j.detail || "bridge offline") + " — start it with: bash whatsapp/run.sh bridge";
+    return;
+  }
+  if (j.code) {
+    $("wa-pair-out").textContent = "🔑 Pairing code: " + j.code + " — enter it in WhatsApp → Settings → Linked devices.";
+  } else {
+    $("wa-pair-out").textContent = j.message || "already logged in.";
+  }
+};
+
+async function loadIntegrations() {
+  try {
+    const st = await json(await api("/api/integrations"));
+    const tg = st.telegram || {};
+    $("tg-enabled").checked = !!tg.enabled;
+    const me = tg.me && tg.me.username ? "@" + tg.me.username : "";
+    const bits = [];
+    if (tg.running) bits.push(`● running${me ? " as " + me : ""}`);
+    else if (tg.configured && tg.enabled) bits.push("○ token saved but not running (restart or save again)");
+    else if (tg.configured) bits.push("○ token saved, bot disabled");
+    else bits.push("○ not configured yet");
+    if (tg.error) bits.push("⚠ " + tg.error);
+    $("tg-status").textContent = "Status: " + bits.join(" · ");
+    renderWhatsApp(st.whatsapp || {});
+    stopBotPoll();
+    botPollTimer = setTimeout(loadIntegrations, 2000);
+  } catch (e) {
+    $("tg-status").textContent = "Status: error loading — " + e.message;
+    stopBotPoll();
+    botPollTimer = setTimeout(loadIntegrations, 2000);
+  }
+}
+
+$("tg-save").onclick = async () => {
+  $("tg-status").textContent = "saving…";
+  const r = await api("/api/integrations/telegram", {
+    method: "POST",
+    body: { token: $("tg-token").value.trim(), enabled: $("tg-enabled").checked },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("tg-status").textContent = "error: " + (j.detail || "failed"); return; }
+  $("tg-token").value = "";
+  if (j.error) { $("tg-status").textContent = "Status: " + j.error; return; }
+  await loadIntegrations();
+};
 
 async function openSettings() {
   $("settings-modal").classList.remove("hidden");

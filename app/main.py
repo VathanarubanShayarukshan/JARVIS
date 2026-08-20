@@ -10,6 +10,7 @@ import json
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,24 @@ from .skills import list_skills, load_skill
 
 WEBUI_DIR = Path(__file__).resolve().parent.parent / "webui"
 
-app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    token = db.get_setting("telegram_token")
+    enabled = db.get_setting("telegram_enabled") == "1"
+    if token and enabled:
+        try:
+            from .telegram import bot_status, start_bot
+
+            await start_bot(token)
+            me = bot_status().get("me") or {}
+            print(f"[telegram] bot running as @{me.get('username', '?')}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[telegram] failed to start: {e}")
+    yield
+
+
+app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
 # --------------------------------------------------------------------------
@@ -258,6 +276,8 @@ def _resolve_provider(provider_id: str | None) -> Any:
             if str(meta["id"]) == str(provider_id):
                 key = raw.get("api_key")
                 if not key and meta.get("is_custom") == 0:
+                    if str(meta.get("base_url", "")).startswith("builtin://"):
+                        return make(meta, None, meta.get("models") or [])
                     raise LLMError(
                         f"Provider '{meta['name']}' has no API key yet. "
                         "A host/admin must add a (free) key in Settings | Models."
@@ -278,9 +298,16 @@ def _resolve_provider(provider_id: str | None) -> Any:
         p = local[0]
         return Provider(id=p.id, name=p.name, base_url=p.base_url, api_key=None, models=p.models)
 
+    tiny = next(
+        (meta for meta, _raw in db_providers if str(meta.get("base_url", "")).startswith("builtin://")),
+        None,
+    )
+    if tiny:
+        return make(tiny, None, tiny.get("models") or [])
+
     raise LLMError(
-        "No model provider with an API key is configured. "
-        "Go to Settings | Models and add a free key (Gemini / Groq / OpenRouter)."
+        "No model provider with an API key is configured (TinyAI built-in is also unset). "
+        "Go to Settings | Models and add a free key (Gemini / Groq / OpenRouter) or pick TinyAI."
     )
 
 
@@ -373,6 +400,90 @@ def delete_token(token_id: int) -> dict[str, str]:
     if not db.delete_token(token_id):
         raise HTTPException(status_code=404, detail="token not found")
     return {"ok": "deleted"}
+
+
+# --------------------------------------------------------------------------
+# integrations (Telegram via BotFather + WhatsApp)
+# --------------------------------------------------------------------------
+
+def _integrations_status() -> dict[str, Any]:
+    from .telegram import bot_status
+
+    tg = {"configured": bool(db.get_setting("telegram_token")),
+          "enabled": db.get_setting("telegram_enabled") == "1"}
+    tg.update(bot_status())
+    wa = {
+        "readme": (Path(__file__).resolve().parent.parent / "whatsapp" / "README.md").exists(),
+        "bridge_up": False,
+        "state": "offline",
+        "connected": False,
+        "user": None,
+        "qr": None,
+        "pairCode": None,
+        "pairNumber": None,
+        "events": [],
+    }
+    try:
+        import httpx
+
+        r = httpx.get("http://127.0.0.1:9511/status", timeout=2.0)
+        if r.status_code == 200:
+            j = r.json()
+            wa["bridge_up"] = True
+            wa.update({k: j.get(k) for k in ("state", "connected", "user", "qr", "pairCode", "pairNumber", "events")})
+    except Exception:
+        pass
+    return {"telegram": tg, "whatsapp": wa}
+
+
+@app.get("/api/integrations", dependencies=[Depends(require_web)])
+def integrations() -> dict[str, Any]:
+    return _integrations_status()
+
+
+@app.post("/api/integrations/telegram", dependencies=[Depends(require_web)])
+async def set_telegram(body: dict[str, Any]) -> dict[str, Any]:
+    token = str(body.get("token") or "").strip()
+    enabled = bool(body.get("enabled"))
+    if token:
+        db.set_setting("telegram_token", token)
+    db.set_setting("telegram_enabled", "1" if enabled else "0")
+    token = token or db.get_setting("telegram_token") or ""
+    from .telegram import start_bot, stop_bot
+
+    if enabled and token:
+        try:
+            await start_bot(token)
+            return _integrations_status()
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}", **_integrations_status()}
+    await stop_bot()
+    return _integrations_status()
+
+
+@app.post("/api/integrations/whatsapp/logout", dependencies=[Depends(require_web)])
+def whatsapp_logout() -> dict[str, Any]:
+    try:
+        import httpx
+
+        r = httpx.post("http://127.0.0.1:9511/logout", timeout=5.0)
+        return {"ok": r.status_code == 200}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/integrations/whatsapp/pair", dependencies=[Depends(require_web)])
+def whatsapp_pair(body: dict[str, Any]) -> dict[str, Any]:
+    number = str(body.get("number") or "").strip()
+    if not number.isdigit():
+        raise HTTPException(status_code=400, detail="number with country code required, digits only")
+    try:
+        import httpx
+
+        r = httpx.post("http://127.0.0.1:9511/pair", json={"number": number}, timeout=25.0)
+        return r.json()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
 
 
 # --------------------------------------------------------------------------
@@ -469,6 +580,14 @@ def file_download(path: str) -> FileResponse:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEBUI_DIR / "index.html")
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/assets", "/")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def mount_static() -> None:
