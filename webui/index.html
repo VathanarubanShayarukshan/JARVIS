@@ -48,8 +48,16 @@
 
   <main class="main">
     <header class="topbar">
-      <select id="model-select" title="Model" class="model-select"></select>
-      <span id="online-dot" class="dot" title="connection"></span>
+      <div class="topbar-left">
+        <select id="skill-select" class="skill-select" title="Skill">
+          <option value="">No skill</option>
+        </select>
+        <span class="skill-hint-vbar"></span>
+      </div>
+      <div class="topbar-right">
+        <select id="model-select" title="Model" class="model-select"></select>
+        <span id="online-dot" class="dot" title="connection"></span>
+      </div>
     </header>
 
     <div id="chat" class="chat"></div>
@@ -121,13 +129,25 @@
 
       <div class="tab-panel hidden" id="tab-files">
         <div class="file-panel">
-          <div id="file-tree" class="file-tree"></div>
-          <div class="file-editor">
+          <div class="file-toolbar">
             <div class="row">
-              <span id="file-path" class="muted small">select a file</span>
-              <button id="file-save" class="primary hidden">Save file</button>
+              <label for="file-upload" class="upload-label">Upload</label>
+              <input type="file" id="file-upload" class="file-input" multiple>
+              <button id="file-upload-btn" class="primary">Upload here</button>
+              <span id="upload-out" class="muted small"></span>
             </div>
-            <textarea id="file-content" class="file-content" placeholder="Click a file in the workspace to view/edit it"></textarea>
+          </div>
+          <div class="file-body">
+            <div id="file-tree" class="file-tree"></div>
+            <div class="file-editor">
+              <div class="row">
+                <span id="file-path" class="muted small">select a file</span>
+                <span class="flex-spacer"></span>
+                <button id="file-download" class="ghost hidden">Download</button>
+                <button id="file-save" class="primary hidden">Save file</button>
+              </div>
+              <textarea id="file-content" class="file-content" placeholder="Click a file in the workspace to view/edit it"></textarea>
+            </div>
           </div>
         </div>
       </div>

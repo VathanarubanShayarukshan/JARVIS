@@ -119,7 +119,24 @@ $("logout-btn").onclick = () => {
 };
 
 async function loadAll() {
-  await Promise.all([loadSessions(), loadProviders(), loadModels()]);
+  await Promise.all([loadSessions(), loadProviders(), loadModels(), loadSkills()]);
+}
+
+async function loadSkills() {
+  const sel = $("skill-select");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">No skill</option>';
+  try {
+    const skills = await json(await api("/api/skills"));
+    for (const s of skills) {
+      const o = document.createElement("option");
+      o.value = s.id;
+      o.textContent = s.title;
+      o.title = s.description || "";
+      sel.appendChild(o);
+    }
+  } catch { /* skills are optional */ }
+  sel.value = keep;
 }
 
 async function loadModels() {
@@ -186,7 +203,17 @@ function renderChat(msgs) {
   const inner = document.createElement("div");
   inner.className = "chat-inner";
   if (!msgs || msgs.length === 0) {
-    inner.innerHTML = '<div class="empty-chat"><h2>AgenticAI</h2><p>Ask it to build something, fix a bug,<br>or browse the web — it has file, shell and web tools.</p></div>';
+    inner.innerHTML =
+      '<div class="empty-chat">' +
+      '<div class="logo">🤖</div>' +
+      '<h2>AgenticAI</h2>' +
+      '<p>Ask it to build something, fix a bug, or browse the web.<br>It has file, shell and web tools in a safe workspace.</p>' +
+      '<div class="chips">' +
+      chips.map((c) => `<button class="chip">${esc(c)}</button>`).join("") +
+      "</div></div>";
+    for (const chip of inner.querySelectorAll(".chip")) {
+      chip.onclick = () => { $("input").value = chip.textContent; $("input").focus(); };
+    }
   } else {
     for (const m of msgs) {
       const div = document.createElement("div");
@@ -322,6 +349,7 @@ async function send() {
         message: userText,
         provider_id: modelProviderId(),
         model: modelId(),
+        skill: $("skill-select").value || null,
       },
     });
     if (!r.ok) {
@@ -404,6 +432,13 @@ async function autoTitle() {
 }
 
 /* ---------------- provider / model selection ---------------- */
+
+const chips = [
+  "Create a simple to-do app in a single HTML file",
+  "List the files in the workspace and summarize them",
+  "Write a Python script that prints the first 10 Fibonacci numbers",
+  "Search the web and summarize today's tech news",
+];
 
 function modelProviderId() {
   const parts = String(state.modelKey || "").split("|");
@@ -639,6 +674,7 @@ $("change-pass-btn").onclick = async () => {
 /* ---------------- file browser ---------------- */
 
 let fileTreeLoaded = false;
+let fileDir = ""; // currently selected directory in the file browser
 
 async function loadFileTree(force) {
   if (!force && fileTreeLoaded) return;
@@ -655,12 +691,22 @@ async function renderDir(container, path, depth) {
   for (const e of data.entries) {
     const node = document.createElement("div");
     node.className = "file-node " + (e.type === "dir" ? "dir" : "file");
-    node.innerHTML = `<span class="indent" style="width:${depth * 14}px"></span>📁 ${esc(e.name)}`;
-    if (e.type === "file") node.innerHTML = `<span class="indent" style="width:${depth * 14}px"></span>📄 ${esc(e.name)}`;
+    node.dataset.path = e.path || fileDir;
+    const icon = e.type === "dir" ? "📁" : "📄";
+    if (e.type === "file") {
+      node.innerHTML =
+        `<span class="indent" style="width:${depth * 14}px"></span><span class="f-icon">${icon}</span><span class="f-name">${esc(e.name)}</span>` +
+        `<span class="f-size muted small">${e.size != null ? fmtSize(e.size) : ""}</span>` +
+        `<a class="f-download" title="Download" href="/api/files/download?path=${encodeURIComponent(e.path)}" download>⬇</a>`;
+      node.querySelector(".f-download").onclick = (ev) => ev.stopPropagation();
+    } else {
+      node.innerHTML = `<span class="indent" style="width:${depth * 14}px"></span><span class="f-icon">${icon}</span><span class="f-name">${esc(e.name)}</span>`;
+    }
     node.onclick = async () => {
       document.querySelectorAll(".file-node").forEach((n) => n.classList.remove("selected"));
       node.classList.add("selected");
       if (e.type === "dir") {
+        fileDir = e.path || "";
         const sub = document.createElement("div");
         if (!node.nextElementSibling) { container.insertBefore(sub, node.nextSibling); }
         else if (node.nextElementSibling.dataset.sub) { node.nextElementSibling.remove(); return; }
@@ -672,6 +718,8 @@ async function renderDir(container, path, depth) {
         $("file-path").textContent = e.path;
         $("file-save").classList.remove("hidden");
         $("file-save").dataset.path = e.path;
+        $("file-download").classList.remove("hidden");
+        $("file-download").dataset.path = e.path;
         $("file-content").value = fj.content || "";
       }
     };
@@ -679,11 +727,50 @@ async function renderDir(container, path, depth) {
   }
 }
 
+function fmtSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
 $("file-save").onclick = async () => {
   await api("/api/files/write", {
     method: "POST",
     body: { path: $("file-save").dataset.path, content: $("file-content").value },
   });
+  $("file-save").textContent = "Saved ✓";
+  setTimeout(() => ($("file-save").textContent = "Save file"), 1200);
+};
+
+$("file-download").onclick = () => {
+  if ($("file-download").dataset.path) {
+    window.location.href = "/api/files/download?path=" + encodeURIComponent($("file-download").dataset.path);
+  }
+};
+
+$("file-upload-btn").onclick = async () => {
+  const input = $("file-upload");
+  const files = input.files;
+  if (!files.length) { $("upload-out").textContent = "choose file(s) first"; return; }
+  $("upload-out").textContent = "uploading…";
+  const fd = new FormData();
+  fd.append("path", fileDir || "");
+  for (const f of files) fd.append("file", f, f.name);
+  try {
+    const r = await fetch("/api/files/upload", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token },
+      body: fd,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || "upload failed");
+    $("upload-out").textContent = j.ok;
+    input.value = "";
+    fileTreeLoaded = false;
+    await loadFileTree(true);
+  } catch (e) {
+    $("upload-out").textContent = "Error: " + e.message;
+  }
 };
 
 /* ---------------- boot ---------------- */

@@ -1,0 +1,483 @@
+ubuntu@kali:~$ cd Te
+bash: cd: Te: No such file or directory
+ubuntu@kali:~$ cd Te
+Templates/ Termux/    
+ubuntu@kali:~$ cd Te
+Templates/ Termux/    
+ubuntu@kali:~$ cd Termux/
+ubuntu@kali:~/Termux$ cat i
+image.png      index.js       index.js.save  
+ubuntu@kali:~/Termux$ cat index.js
+// PRODUCTION APPARATUS ANTI-CRASH INTERCEPTORS
+process.on('uncaughtException', (err) => {
+    console.error('[Anti-Crash Shield] Caught Uncaught Exception:', err.message || err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Anti-Crash Shield] Caught Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { exec } = require('child_process');
+const readline = require('readline');
+const pino = require('pino');
+const fs = require('fs');
+const path = require('path');
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+const sessions = {};
+const botMessageIds = new Set(); // லூப் பிழைகளைத் தடுக்க தனித்துவமான மெசேஜ் ஐடி டிராக்கர்
+
+async function startBot() {
+    let phoneNumber = "";
+    const { state, saveCreds } = await useMultiFileAuthState('auth_session');
+
+    if (!state.creds || !state.creds.registered) {
+        console.clear();
+        phoneNumber = await question('👉 Enter your WhatsApp number with country code:\n');
+        phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+    }
+
+    const { version } = await fetchLatestBaileysVersion();
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        logger: pino({ level: 'silent' }),
+        browser: ["Mac OS", "Chrome", "10.15.7"],
+        keepAliveIntervalMs: 30000,
+        defaultQueryTimeoutMs: undefined,
+        connectTimeoutMs: 60000
+    });
+
+    const sendMessageSafe = async (jid, content, options = {}) => {
+        try {
+            const res = await sock.sendMessage(jid, content, options);
+            if (res && res.key && res.key.id) {
+                botMessageIds.add(res.key.id);
+                if (botMessageIds.size > 2000) {
+                    const nextDel = botMessageIds.values().next().value;
+                    botMessageIds.delete(nextDel);
+                }
+            }
+            return res;
+        } catch (e) {
+            console.error(`[Safe Send Bypass] Intercepted socket send failure:`, e.message);
+            return null;
+        }
+    };
+
+    if (!sock.authState.creds.registered && phoneNumber) {
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(phoneNumber);
+                console.log(`\n🔑 YOUR VALID PAIRING CODE IS: \x1b[1;32m${code}\x1b[0m`);
+            } catch (e) { console.error(e); }
+        }, 4000);
+    }
+
+    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('connection.update', (update) => {
+        if (update.connection === 'open') console.log('\n✅ System Connected Securely! Infinite Loop Shield Active.');
+        if (update.connection === 'close') startBot();
+    });
+
+    sock.ev.on('messages.upsert', async (m) => {
+        try {
+            for (const msg of m.messages) {
+                if (!msg || !msg.message) continue;
+
+                // முதற்கட்ட பாதுகாப்பு: பாட் அனுப்பிய மெசேஜ் ஐடி என்றால் உடனடியாகப் புறக்கணிக்கவும்
+                if (msg.key && msg.key.id && botMessageIds.has(msg.key.id)) {
+                    continue;
+                }
+
+                const from = msg.key.remoteJid;
+                let msgContent = msg.message;
+
+                if (msgContent.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message;
+                if (msgContent.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message;
+                if (msgContent.viewOnceMessageV2) msgContent = msgContent.viewOnceMessageV2.message;
+                if (msgContent.documentWithCaptionMessage) msgContent = msgContent.documentWithCaptionMessage.message;
+
+                if (!msgContent) continue;
+
+                const streamType = msgContent.imageMessage ? 'image' : 
+                                   msgContent.videoMessage ? 'video' : 
+                                   msgContent.audioMessage ? 'audio' : 
+                                   msgContent.documentMessage ? 'document' : null;
+
+                let text = (msgContent.conversation || 
+                            msgContent.extendedTextMessage?.text || 
+                            msgContent.imageMessage?.caption || 
+                            msgContent.videoMessage?.caption || 
+                            msgContent.documentMessage?.caption || '').trim();
+                
+                if (!text && !streamType) continue;
+
+                // இரண்டாம் கட்ட பாதுகாப்பு (Fallback Text Filter)
+                if (msg.key.fromMe) {
+                    const cleanText = text.replace(/[*_`~]/g, ''); 
+                    const isBotReply = cleanText.includes('MODE ACTIVATED') || 
+                                       cleanText.includes('MODE TERMINATED') || 
+                                       cleanText.includes('Capturing:') || 
+                                       cleanText.includes('Scroll:') || 
+                                       cleanText.includes('Delay:') || 
+                                       cleanText.includes('Result:') || 
+                                       cleanText.includes('Failed:') || 
+                                       cleanText.includes('Directory:') || 
+                                       cleanText.includes('File not found') || 
+                                       cleanText.includes('File captured') || 
+                                       cleanText.includes('Progress:') ||
+                                       cleanText.includes('Active Tasks') ||
+                                       cleanText.includes('Tasks Terminated:') ||
+                                       cleanText.includes('Command Guide') || 
+                                       cleanText.includes('Kill:') ||
+                                       cleanText.includes('valid media/document') ||
+                                       cleanText.includes('Executed with no output');
+                    if (isBotReply) continue;
+                }
+
+                if (!sessions[from]) sessions[from] = { mode: 'normal', cwd: '/home/ubuntu', tasks: [] };
+                const currentSession = sessions[from];
+
+                if (text === '.help') {
+                    let helpText = `📖 *TCZone AI - Command Guide* 📖\n\n` +
+                                   `🤖 *Available Core Modes & Examples:*\n\n` +
+                                   `💻 *1. RUN MODE (Linux Terminal)*\n` +
+                                   `• Format: \`.run <command>\`\n` +
+                                   `• Example: \`.run ls -la\` or \`.run node -v\`\n\n` +
+                                   `📁 *2. SEND MODE (File Downloader)*\n` +
+                                   `• Format: \`.send <file_name>\`\n` +
+                                   `• Example: \`.send video.mp4\`\n\n` +
+                                   `📥 *3. GET MODE (File Uploader)*\n` +
+                                   `• Format: Send media with caption \`<save_path>\`\n\n` +
+                                   `🌐 *4. BROWSE MODE (Web Screenshot & Custom Controls)*\n` +
+                                   `• Format: \`.brows <url> [-p scroll_value] [-d delay_ms]\`\n` +
+                                   `• Example 1: \`.brows youtube.com -p 50% -d 6000\`\n` +
+                                   `• Example 2: \`.brows google.com -p 2000 -d 3000\`\n` +
+                                   `• *Flags Definition:*\n` +
+                                   `  \`-p\` : ஸ்க்ரோல் அளவு (e.g., \`40%\` அல்லது \`3000\`. Default: \`30%\`)\n` +
+                                   `  \`-d\` : லோடிங் தாமதம் மில்லிசெகண்டில் (Default: \`2000\`)\n\n` +
+                                   `⚙️ *Task Control (Isolated per Mode):*\n` +
+                                   `• \`.pro\` - Check active background tasks progress\n` +
+                                   `• \`.kill\` - Stop running processes in current mode safely\n` +
+                                   `• \`.stop\` - Exit interactive mode and reset to normal\n\n` +
+                                   `💡 *Note:* Target paths/files default to \`/home/ubuntu\` if not specified.`;
+                    
+                    await sendMessageSafe(from, { text: helpText });
+                    continue;
+                }
+
+                if (text === '.pro') {
+                    const modeTasks = currentSession.tasks.filter(t => t.mode === currentSession.mode);
+                    if (modeTasks.length > 0) {
+                        let out = `📊 *Active Tasks (${currentSession.mode.toUpperCase()} MODE):*`;
+                        modeTasks.forEach(t => {
+                            out += `\n• \`${t.name}\` - *${t.progress}%*`;
+                        });
+                        await sendMessageSafe(from, { text: out });
+                    } else {
+                        await sendMessageSafe(from, { text: `📊 *Progress:* No active background tasks running in *${currentSession.mode}* mode.` });
+                    }
+                    continue;
+                }
+
+                if (text === '.kill') {
+                    const modeTasks = currentSession.tasks.filter(t => t.mode === currentSession.mode);
+                    if (modeTasks.length > 0) {
+                        let killedNames = [];
+                        for (const t of modeTasks) {
+                            t.wasKilled = true;
+                            killedNames.push(`\`${t.name}\``);
+                            if (t.stream) { try { t.stream.destroy(); } catch(e){} }
+                            if (t.browser) { try { await t.browser.close(); } catch(e){} }
+                        }
+                        currentSession.tasks = currentSession.tasks.filter(t => t.mode !== currentSession.mode);
+                        await sendMessageSafe(from, { text: `❌ *Tasks Terminated:* Killed processes inside *${currentSession.mode}* mode: ${killedNames.join(', ')}` });
+                    } else {
+                        await sendMessageSafe(from, { text: `📊 *Kill:* No active background tasks found to kill in *${currentSession.mode}* mode.` });
+                    }
+                    continue;
+                }
+
+                if (text === '.stop') {
+                    currentSession.mode = 'normal';
+                    await sendMessageSafe(from, { text: `✅ *MODE TERMINATED*\nInteractive mode reset.` });
+                    continue;
+                }
+
+                if (text) {
+                    if (text === '.run' || text.startsWith('.run ')) {
+                        currentSession.mode = 'run';
+                        if (text === '.run') {
+                            await sendMessageSafe(from, { text: `💻 *RUN MODE ACTIVATED*\n📂 CWD: \`${currentSession.cwd}\`` });
+                            continue;
+                        }
+                        text = text.slice(5).trim();
+                    }
+                    else if (text === '.send' || text.startsWith('.send ')) {
+                        currentSession.mode = 'send';
+                        if (text === '.send') {
+                            await sendMessageSafe(from, { text: `📁 *SEND MODE ACTIVATED*\nSend file name to download.` });
+                            continue;
+                        }
+                        text = text.slice(6).trim();
+                    }
+                    else if (text === '.get' || text.startsWith('.get ')) {
+                        currentSession.mode = 'get';
+                        if (text === '.get') {
+                            await sendMessageSafe(from, { text: `📥 *GET MODE ACTIVATED*\nSend media with caption to upload.` });
+                            continue;
+                        }
+                        text = text.slice(4).trim();
+                    }
+                    else if (text === '.brows' || text.startsWith('.brows ')) {
+                        currentSession.mode = 'brows';
+                        if (text === '.brows') {
+                            await sendMessageSafe(from, { text: `🌐 *BROWSE MODE ACTIVATED*\nSend URL now.` });
+                            continue;
+                        }
+                        text = text.slice(7).trim();
+                    }
+                }
+
+                if (currentSession.mode === 'normal') continue;
+                if (!text && currentSession.mode !== 'get') continue;
+
+                if (currentSession.mode === 'run') {
+                    const wrappedCommand = `cd '${currentSession.cwd.replace(/'/g, "'\\''")}' && ${text} ; echo "___CWD_TOKEN___" ; pwd`;
+                    exec(wrappedCommand, { shell: '/bin/bash' }, async (err, stdout, stderr) => {
+                        let cleanStdout = stdout;
+                        if (stdout.includes('___CWD_TOKEN___')) {
+                            const parts = stdout.split('___CWD_TOKEN___');
+                            cleanStdout = parts[0] ? parts[0].trim() : '';
+                            const parsedCwd = parts[1] ? parts[1].trim() : currentSession.cwd;
+                            if (fs.existsSync(parsedCwd)) currentSession.cwd = parsedCwd;
+                        }
+                        const feedback = cleanStdout || stderr || err?.message || 'Executed with no output.';
+                        await sendMessageSafe(from, { text: `💻 *Directory:* \`${currentSession.cwd}\`\n\n${feedback}` });
+                    });
+                    continue;
+                }
+
+                if (currentSession.mode === 'send') {
+                    const normalizedInput = text.replace(/['"]/g, '');
+                    const filePath = path.isAbsolute(normalizedInput) ? normalizedInput : path.join(currentSession.cwd, normalizedInput);
+                    if (!fs.existsSync(filePath) || !fs.lstatSync(filePath).isFile()) {
+                        await sendMessageSafe(from, { text: `❌ File not found: \`${filePath}\`` });
+                        continue;
+                    }
+                    const fileName = path.basename(filePath);
+                    const totalBytes = fs.statSync(filePath).size;
+                    const currentTaskId = Date.now();
+                    
+                    const readStream = fs.createReadStream(filePath);
+                    const taskObj = { id: currentTaskId, name: fileName, progress: 0, stream: readStream, browser: null, wasKilled: false, mode: 'send' };
+                    currentSession.tasks.push(taskObj);
+
+                    (async () => {
+                        let fileBuffer = Buffer.from([]);
+                        try {
+                            for await (const chunk of readStream) {
+                                fileBuffer = Buffer.concat([fileBuffer, chunk]);
+                                const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                                if (!liveTask || liveTask.wasKilled) return; 
+                                liveTask.progress = Math.round((fileBuffer.length / totalBytes) * 100);
+                            }
+                            
+                            let opts = { document: fileBuffer, fileName: fileName, mimetype: 'application/octet-stream' };
+                            if (/\.(jpg|jpeg|png)$/i.test(fileName)) opts = { image: fileBuffer, caption: fileName };
+                            else if (/\.(mp4|3gp|mkv)$/i.test(fileName)) opts = { video: fileBuffer, caption: fileName };
+                            else if (/\.(mp3|wav|m4a|ogg)$/i.test(fileName)) opts = { audio: fileBuffer, mimetype: 'audio/mp4' };
+                            
+                            const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) {
+                                await sendMessageSafe(from, opts);
+                            }
+                        } catch (e) {
+                            const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) {
+                                await sendMessageSafe(from, { text: '❌ *Send Failed:* ' + e.message });
+                            }
+                        } finally {
+                            currentSession.tasks = currentSession.tasks.filter(t => t.id !== currentTaskId);
+                        }
+                    })();
+                    continue;
+                }
+
+                if (currentSession.mode === 'get') {
+                    if (!streamType) {
+                        await sendMessageSafe(from, { text: '❌ Please send a valid media/document attachment.' });
+                        continue;
+                    }
+
+                    let dest = text.replace(/['"]/g, '');
+                    const mediaMessage = msgContent[streamType + 'Message'];
+                    const defaultName = mediaMessage.fileName || `file_${Date.now()}.${mediaMessage.mimetype?.split('/')[1]?.split(';')[0] || 'bin'}`;
+                    const totalBytes = parseInt(mediaMessage.fileLength || 0);
+                    const currentTaskId = Date.now();
+
+                    let finalPath;
+                    if (!dest) {
+                        finalPath = path.join('/home/ubuntu', defaultName);
+                    } else {
+                        finalPath = path.isAbsolute(dest) ? dest : path.join(currentSession.cwd || '/home/ubuntu', dest);
+                        if (!path.extname(finalPath)) {
+                            if (!fs.existsSync(finalPath)) fs.mkdirSync(finalPath, { recursive: true });
+                            finalPath = path.join(finalPath, defaultName);
+                        } else {
+                            const dir = path.dirname(finalPath);
+                            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                        }
+                    }
+
+                    const stream = await downloadContentFromMessage(mediaMessage, streamType);
+                    const taskObj = { id: currentTaskId, name: path.basename(finalPath), progress: 0, stream: stream, browser: null, wasKilled: false, mode: 'get' };
+                    currentSession.tasks.push(taskObj);
+
+                    (async () => {
+                        let buffer = Buffer.from([]);
+                        try {
+                            for await (const chunk of stream) {
+                                buffer = Buffer.concat([buffer, chunk]);
+                                const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                                if (!liveTask || liveTask.wasKilled) return;
+                                if (totalBytes > 0) {
+                                    liveTask.progress = Math.round((buffer.length / totalBytes) * 100);
+                                }
+                            }
+                            fs.writeFileSync(finalPath, buffer);
+                            await sendMessageSafe(from, { text: `✅ File captured inside: \`${finalPath}\`` });
+                        } catch (e) {
+                            const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) {
+                                await sendMessageSafe(from, { text: '❌ *Get Failed:* ' + e.message });
+                            }
+                        } finally {
+                            currentSession.tasks = currentSession.tasks.filter(t => t.id !== currentTaskId);
+                        }
+                    })();
+                    continue;
+                }
+
+                if (currentSession.mode === 'brows') {
+                    const tokens = text.split(/\s+/);
+                    let targetUrl = tokens[0];
+                    let scrollParam = '30%';
+                    let delayParam = 2000;
+
+                    for (let i = 1; i < tokens.length; i++) {
+                        if (tokens[i] === '-p' && tokens[i + 1]) {
+                            scrollParam = tokens[i + 1];
+                            i++;
+                        } else if (tokens[i] === '-d' && tokens[i + 1]) {
+                            delayParam = parseInt(tokens[i + 1]) || 2000;
+                            i++;
+                        } else if (i === 1 && !tokens[i].startsWith('-')) {
+                            scrollParam = tokens[i];
+                        }
+                    }
+
+                    if (!targetUrl.startsWith('http')) targetUrl = 'https://' + targetUrl;
+                    await sendMessageSafe(from, { text: `⏳ *Capturing:* ${targetUrl}\n📜 Scroll: ${scrollParam}\n⏱️ Delay: ${delayParam}ms` });
+                    
+                    const currentTaskId = Date.now();
+                    const taskObj = { id: currentTaskId, name: targetUrl, progress: 10, stream: null, browser: null, wasKilled: false, mode: 'brows' };
+                    currentSession.tasks.push(taskObj);
+                    
+                    (async () => {
+                        let browser;
+                        try {
+                            const puppeteer = require('puppeteer');
+                            let liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) liveTask.progress = 30;
+                            
+                            browser = await puppeteer.launch({ 
+                                headless: true, 
+                                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled'] 
+                            });
+                            
+                            liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (!liveTask || liveTask.wasKilled) { if(browser) await browser.close(); return; }
+                            
+                            liveTask.browser = browser;
+                            liveTask.progress = 50;
+                            
+                            const page = await browser.newPage();
+                            await page.evaluateOnNewDocument(() => {
+                                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                            });
+                            
+                            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+                            await page.setViewport({ width: 1280, height: 800 });
+                            
+                            try {
+                                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+                            } catch (e) {
+                                console.log(`[Bypass Log] Render enforced for: ${targetUrl}`);
+                            }
+                            
+                            liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (!liveTask || liveTask.wasKilled) { if(browser) await browser.close(); return; }
+                            liveTask.progress = 70;
+                            
+                            await page.evaluate(async (scrollParam) => {
+                                await new Promise((resolve) => {
+                                    let totalHeight = 0;
+                                    const distance = 400;
+                                    const fullHeight = document.body.scrollHeight;
+                                    let maxScroll;
+
+                                    if (scrollParam.includes('%')) {
+                                        const percent = parseInt(scrollParam) || 30;
+                                        maxScroll = (fullHeight * percent) / 100;
+                                    } else {
+                                        maxScroll = parseInt(scrollParam) || 3200;
+                                    }
+                                    
+                                    const timer = setInterval(() => {
+                                        window.scrollBy(0, distance);
+                                        totalHeight += distance;
+
+                                        if (totalHeight >= document.body.scrollHeight || totalHeight >= maxScroll) {
+                                            clearInterval(timer);
+                                            resolve();
+                                        }
+                                    }, 200);
+                                });
+                            }, scrollParam);
+                            
+                            await new Promise(r => setTimeout(r, delayParam));
+                            
+                            liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (!liveTask || liveTask.wasKilled) { if(browser) await browser.close(); return; }
+                            liveTask.progress = 90;
+                            
+                            const buf = await page.screenshot();
+                            await browser.close();
+                            
+                            liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) {
+                                await sendMessageSafe(from, { image: buf, caption: `🌐 *Result:* ${targetUrl}` });
+                            }
+                        } catch (e) {
+                            if (browser) try { await browser.close(); } catch(err){}
+                            const liveTask = currentSession.tasks.find(t => t.id === currentTaskId);
+                            if (liveTask && !liveTask.wasKilled) {
+                                await sendMessageSafe(from, { text: '❌ *Browse Failed:* ' + e.message });
+                            }
+                        } finally {
+                            currentSession.tasks = currentSession.tasks.filter(t => t.id !== currentTaskId);
+                        }
+                    })();
+                    continue;
+                }
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    });
+}
+startBot();
+ubuntu@kali:~/Termux$ 

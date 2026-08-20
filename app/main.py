@@ -22,6 +22,7 @@ from .agent import run_agent
 from .config import settings
 from .llm import LLMError, detect_free_providers, from_env_provider, probe
 from .presets import preset_hint
+from .skills import list_skills, load_skill
 
 WEBUI_DIR = Path(__file__).resolve().parent.parent / "webui"
 
@@ -316,9 +317,15 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     if not model:
         return JSONResponse(status_code=400, content={"detail": "no model selected"})
 
+    skill_id = str(body.get("skill") or "").strip()
+    skill_body = load_skill(skill_id) if skill_id else None
+
     async def stream():
         try:
-            async for ev in run_agent(provider, model, session_id, message):
+            effective = message
+            if skill_body:
+                effective = f"{skill_body}\n\n---\n\nTask:\n{message}"
+            async for ev in run_agent(provider, model, session_id, effective):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         except Exception as e:  # noqa: BLE001
             yield f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'}, ensure_ascii=False)}\n\n"
@@ -330,6 +337,11 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
 def models() -> dict[str, Any]:
     default = settings.default_model
     return {"default_model": default}
+
+
+@app.get("/api/skills", dependencies=[Depends(require_any)])
+def skills() -> list[dict[str, Any]]:
+    return list_skills()
 
 
 # --------------------------------------------------------------------------
@@ -415,6 +427,33 @@ def file_mkdir(body: dict[str, Any]) -> dict[str, str]:
     p = _fs_resolve(str(body.get("path") or ""))
     p.mkdir(parents=True, exist_ok=True)
     return {"ok": "created", "path": str(p)}
+
+
+@app.post("/api/files/upload", dependencies=[Depends(require_any)])
+async def file_upload(request: Request) -> dict[str, Any]:
+    form = await request.form()
+    target = _fs_resolve(str(form.get("path") or ""))
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="upload path is not a directory")
+    saved: list[str] = []
+    for part in form.getlist("file"):
+        name = Path(getattr(part, "filename", None) or "file").name
+        dest = (target / name).resolve()
+        if not dest.is_relative_to(settings.workspace):
+            raise HTTPException(status_code=400, detail="file name escapes workspace")
+        with dest.open("wb") as out:
+            while chunk := await part.read(1_048_576):
+                out.write(chunk)
+        saved.append(str(dest.relative_to(settings.workspace)).replace("\\", "/"))
+    return {"ok": f"saved {len(saved)} file(s)", "files": saved}
+
+
+@app.get("/api/files/download", dependencies=[Depends(require_any)])
+def file_download(path: str) -> FileResponse:
+    p = _fs_resolve(path)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="not a file")
+    return FileResponse(p, filename=p.name)
 
 
 # --------------------------------------------------------------------------

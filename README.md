@@ -30,13 +30,20 @@ locally (needs lots of CPU/GPU/RAM). AgenticAI fixes that:
 
 ## Features
 
-- Built-in web UI: chat, session history, streaming replies, tool activity cards
+- Built-in web UI: chat, session history, streaming replies, tool activity cards,
+  **file upload/download**, **skills** (Code Review, Explain, Build & Fix…),
+  suggestion chips, responsive design
 - Agent loop with tool calling: read/write/edit files, run shell commands,
   search the web, fetch pages — all inside a sandboxed workspace folder
+- Skills: drop any `skills/*.md` instruction pack in; pick it in the UI or
+  via `"skill"` in the API (see `docs/SKILLS.md`)
 - API + admin UI: providers (any OpenAI-compatible endpoint), API tokens for
   external tools/web apps, workspace file browser/editor, change password
 - Everything persisted in SQLite; zero external dependencies beyond the LLM API
-- Single-process deploy: `python -m app.main`, or Docker
+- Single-process deploy: `python -m app.main`, `./agentic.sh`, or Docker
+
+Docs: `docs/GETTING_STARTED.md`, `docs/API.md`, `docs/SKILLS.md`.
+WhatsApp bot: `whatsapp/` (`.agent` mode drives this API from chat).
 
 ## Quick start (self-host)
 
@@ -44,7 +51,12 @@ Requirements: Python 3.11+ (or Docker).
 
 Linux / macOS:
 ```bash
-./setup.sh          # creates .venv, installs deps, starts server
+git clone https://github.com/VathanarubanShayarukshan/my-agentic-ai.git
+cd my-agentic-ai
+./agentic.sh install     # venv + deps + .env
+./agentic.sh start       # run in background
+./agentic.sh status      # health check
+./agentic.sh logs -f     # tail the logs
 ```
 
 Windows:
