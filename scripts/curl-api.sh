@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AgenticAI REST API cheat sheet for custom UIs (curl).
+# JARVIS REST API cheat sheet for custom UIs (curl).
 #
 # Setup:
 #   BASE=http://localhost:8000

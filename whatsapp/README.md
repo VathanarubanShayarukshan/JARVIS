@@ -1,7 +1,7 @@
-# WhatsApp Bot (Baileys) + AgenticAI
+# WhatsApp Bot (Baileys) + JARVIS
 
 Runs your WhatsApp bot on Termux/Kali Linux (or any Node 18+ box) and adds a
-new **`.agent`** mode that drives the AgenticAI server.
+new **`.agent`** mode that drives the JARVIS server.
 
 ## Setup (Termux / Ubuntu on Termux)
 
@@ -67,9 +67,9 @@ folder first and restart.
 | `.send <file>` | download a file as WhatsApp media |
 | `.get <path>` | send media/document with caption to upload it |
 | `.brows <url> [-p scroll] [-d delay]` | headless screenshot of a page |
-| `.agent` | **AgenticAI mode**: pick provider → pick model (by number) → describe the task → reply with the agent's output |
+| `.agent` | **JARVIS mode**: pick provider → pick model (by number) → describe the task → reply with the agent's output |
 | `.pro` | live status — in agent mode shows `Thinking...` / `Running command: ...` |
-| `.kill` | abort the running task (agent mode: aborts the AgenticAI task) |
+| `.kill` | abort the running task (agent mode: aborts the JARVIS task) |
 | `.stop` | exit the current mode |
 
 ## How `.agent` works
@@ -77,7 +77,7 @@ folder first and restart.
 1. `.agent` → bot lists providers with ids (`1. Google Gemini (free) ✅` …)
 2. reply with the provider number → bot lists that provider's models with ids
 3. reply with the model number → bot asks for the task
-4. send the task → bot streams the AgenticAI run; `.pro` shows live status
+4. send the task → bot streams the JARVIS run; `.pro` shows live status
    (status events, `Running command: write_file {…}`, result received)
 5. final output is sent back (long replies are chunked into 3900-char messages)
 6. send another task to continue, or `.stop` to exit

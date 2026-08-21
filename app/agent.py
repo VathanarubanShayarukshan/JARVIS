@@ -25,6 +25,30 @@ MAX_TOOL_RESULT_CHARS = 12000
 RATE_LIMIT_RETRIES = 4
 
 
+def _next_provider(current_provider: Any) -> Any:
+    """Pick the next available provider when the current one is rate-limited."""
+    from .llm import Provider, all_providers
+    import asyncio
+
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            providers = loop.run_until_complete(all_providers())
+        finally:
+            loop.close()
+    except Exception:
+        return None
+
+    current_id = getattr(current_provider, "id", None)
+    current_url = getattr(current_provider, "base_url", "")
+
+    for p in providers:
+        if p.id != current_id and p.base_url != current_url and p.models:
+            return p
+
+    return None
+
+
 def _retry_after(message: str) -> int:
     m = re.search(r"retry\s+in\s+([\d.]+)\s*s", message, re.I)
     if not m:
@@ -102,13 +126,20 @@ async def run_agent(
                     break
                 except LLMError as e:
                     msg = str(e)
-                    is_retryable = "429" in msg or "rate" in msg.lower() or "quota" in msg.lower()
+                    is_retryable = "429" in msg or "rate" in msg.lower() or "quota" in msg.lower() or "limit" in msg.lower()
                     if not is_retryable or rate_retries <= 0 or len(accumulated_text) != base_text_len:
                         raise
-                    wait = _retry_after(msg)
                     rate_retries -= 1
-                    yield {"type": "status", "message": f"Provider rate-limited; retrying in {wait}s..."}
-                    await asyncio.sleep(wait)
+
+                    next_p = _next_provider(provider)
+                    if next_p:
+                        provider = next_p
+                        client = LLMClient(provider, model)
+                        yield {"type": "status", "message": f"Rate-limited — switching to {provider.name}..."}
+                    else:
+                        wait = _retry_after(msg)
+                        yield {"type": "status", "message": f"Provider rate-limited; retrying in {wait}s..."}
+                        await asyncio.sleep(wait)
 
             if not drafts:
                 break

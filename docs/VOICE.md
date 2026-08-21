@@ -1,6 +1,6 @@
 # Voice chat (walkie-talkie mode)
 
-AgenticAI has a built-in **voice chat mode** — no microphone app needed, it
+JARVIS has a built-in **voice chat mode** — no microphone app needed, it
 uses your browser's mic and speaker (Web Speech API).
 
 ## How it works

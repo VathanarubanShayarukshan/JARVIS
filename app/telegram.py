@@ -229,7 +229,7 @@ class TelegramBot:
 
     def help_text(self) -> str:
         return (
-            "🤖 *AgenticAI Telegram bot*\n\n"
+            "🤖 *JARVIS Telegram bot*\n\n"
             "• /agent <task> — run a task with the agent\n"
             "• or just type your task\n"
             "• /providers — list configured models\n"

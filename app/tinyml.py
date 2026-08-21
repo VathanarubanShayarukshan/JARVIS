@@ -18,7 +18,7 @@ from typing import Any
 TAMIL_RE = re.compile(r"[\u0B80-\u0BFF]")
 
 _INTRO = (
-    "I am TinyAI — the built-in, no-install mini model of this AgenticAI server. "
+    "I am TinyAI — the built-in, no-install mini model of this JARVIS server. "
     "No network, no key, no GPU needed: I run right here."
 )
 _CAPS = (
@@ -48,7 +48,7 @@ _TAMIL = {
         "என்ன உதவி வேண்டும்?"
     ),
     "howare": "நான் நன்றாக இருக்கிறேன்! நீங்கள் எப்படி இருக்கிறீர்கள்?",
-    "who": "நான் TinyAI — இந்த AgenticAI சர்வரின் உள்ளமைந்த சிறிய மாடல். இணையம், கீ, இல்லாமல் இங்கேயே இயங்குகிறேன்.",
+    "who": "நான் TinyAI — இந்த JARVIS சர்வரின் உள்ளமைந்த சிறிய மாடல். இணையம், கீ, இல்லாமல் இங்கேயே இயங்குகிறேன்.",
     "help": "என்னால் இவற்றை செய்ய முடியும்: வணக்கங்கள், எளிய கணிதம் (எ.கா. '12 * 8'), நேரம்/தேதி. பெரிய வேலைகளுக்கு கிளவுட் புரொவைடர் (Gemini / Groq / OpenCode Zen) தேர்ந்தெடுக்கவும்.",
     "thanks": "நன்றி! உங்களுக்கு வேறு உதவி தேவையா?",
     "bye": "நன்றி! மீண்டும் பேசுவோம். 👋",

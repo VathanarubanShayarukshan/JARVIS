@@ -164,7 +164,7 @@ class LLMClient:
                 raise LLMError(f"Cannot reach provider at {self.provider.base_url}: {e}") from e
 
 
-DEFAULT_SYSTEM_PROMPT = """You are AgenticAI, an autonomous coding and general-purpose agent running in a self-hosted sandbox.
+DEFAULT_SYSTEM_PROMPT = """You are JARVIS, an autonomous coding and general-purpose agent running in a self-hosted sandbox.
 
 You have tools available. Decide step-by-step:
 1. Read / inspect the target first when the user asks about existing code or files.

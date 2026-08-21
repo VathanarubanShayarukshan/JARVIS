@@ -146,7 +146,7 @@ async function loadSkills() {
 
 async function loadModels() {
   const m = await json(await api("/api/models"));
-  document.title = "AgenticAI";
+  document.title = "JARVIS";
 }
 
 /* ---------------- sessions ---------------- */
@@ -162,7 +162,10 @@ function renderSessions() {
   for (const s of state.sessions) {
     const item = document.createElement("div");
     item.className = "session-item" + (s.id === state.sessionId ? " active" : "");
-    item.textContent = s.title || "Untitled";
+    const title = document.createElement("span");
+    title.className = "session-title";
+    title.textContent = s.title || "Untitled";
+    item.appendChild(title);
     item.onclick = () => selectSession(s.id);
     const del = document.createElement("button");
     del.className = "del";
@@ -211,7 +214,7 @@ function renderChat(msgs) {
     inner.innerHTML =
       '<div class="empty-chat">' +
       '<div class="logo">🤖</div>' +
-      '<h2>AgenticAI</h2>' +
+      '<h2>JARVIS</h2>' +
       '<p>Ask it to build something, fix a bug, or browse the web.<br>It has file, shell and web tools in a safe workspace.</p>' +
       '<div class="chips">' +
       chips.map((c) => `<button class="chip">${esc(c)}</button>`).join("") +
@@ -420,9 +423,8 @@ async function send() {
 
   const ctrl = new AbortController();
   state.ctrl = ctrl;
-  const stopBtn = $("stop-btn");
-  stopBtn.classList.remove("hidden");
-  stopBtn.disabled = false;
+  $("send-btn").textContent = "⏹ Stop";
+  $("send-btn").classList.add("stopping");
 
   try {
     const r = await api("/api/chat", {
@@ -469,14 +471,14 @@ async function send() {
   } finally {
     state.busy = false;
     state.ctrl = null;
-    stopBtn.classList.add("hidden");
-    stopBtn.disabled = true;
+    $("send-btn").textContent = "Send ↵";
+    $("send-btn").classList.remove("stopping");
     $("send-btn").disabled = false;
     $("input").focus();
   }
 }
 
-$("stop-btn").onclick = () => { if (state.ctrl) { state.ctrl.abort(); state.ctrl = null; } };
+$("send-btn").onclick = () => { if (state.busy && state.ctrl) { state.ctrl.abort(); state.ctrl = null; } else { send(); } };
 
 function handleEvent(ev, asBody) {
   const a = uiState.activity;
@@ -950,16 +952,19 @@ function renderProviders() {
   for (const p of state.providers) {
     const item = document.createElement("div");
     item.className = "provider-item";
+    const isBuiltin = (p.base_url || "").startsWith("builtin://");
     const badge = p.is_custom ? "" : `<span class="p-badge">built-in</span>`;
     item.innerHTML =
       `<div class="p-head"><span class="p-name">${esc(p.name)}</span>${badge}` +
       (p.local ? `<span class="p-badge">local</span>` : "") +
-      `<span class="p-key">${p.api_key_set ? "✓ key set" : "no key"}</span>` +
+      (isBuiltin ? `<span class="p-badge">no key needed</span>` : `<span class="p-key">${p.api_key_set ? "✓ key set" : "no key"}</span>`) +
       `<span style="flex:1"></span></div>`;
-    item.innerHTML +=
-      `<div class="api-key-row"><input type="password" placeholder="API key (free tier)" value="">` +
-      `<button class="save-key">Set key</button>` +
-      (p.is_custom ? `<button class="remove">Delete</button>` : "") + `</div>`;
+    if (!isBuiltin) {
+      item.innerHTML +=
+        `<div class="api-key-row"><input type="password" placeholder="API key (free tier)" value="">` +
+        `<button class="save-key">Set key</button>` +
+        (p.is_custom ? `<button class="remove">Delete</button>` : "") + `</div>`;
+    }
     if (p.hint) item.innerHTML += `<p class="p-hint">${esc(p.hint)}</p>`;
     const allModels = p.models || [];
     const models = allModels.slice(0, 40);
@@ -969,19 +974,21 @@ function renderProviders() {
     item.innerHTML += `<div class="p-models">` +
       models.map((m) => `<span class="model-pill">${esc(m)}</span>`).join("") +
       more + `</div>`;
-    const keyInput = item.querySelector(".api-key-row input");
-    item.querySelector(".save-key").onclick = async () => {
-      const key = keyInput.value.trim();
-      await api("/api/providers/" + p.id, {
-        method: "PUT",
-        body: { api_key: key, models },
-      });
-      keyInput.value = "";
-      p.api_key_set = !!key;
-      p.api_key = null;
-      renderProviders();
-      loadProviders();
-    };
+    if (!isBuiltin) {
+      const keyInput = item.querySelector(".api-key-row input");
+      item.querySelector(".save-key").onclick = async () => {
+        const key = keyInput.value.trim();
+        await api("/api/providers/" + p.id, {
+          method: "PUT",
+          body: { api_key: key, models },
+        });
+        keyInput.value = "";
+        p.api_key_set = !!key;
+        p.api_key = null;
+        renderProviders();
+        loadProviders();
+      };
+    }
     if (p.is_custom) {
       item.querySelector(".remove").onclick = async () => {
         await api("/api/providers/" + p.id, { method: "DELETE" });
@@ -1177,7 +1184,7 @@ $("file-upload-btn").onclick = async () => {
 /* ---------------- boot ---------------- */
 
 (async function init() {
-  document.title = "AgenticAI";
+  document.title = "JARVIS";
   const saved = localStorage.getItem("session");
   await boot();
   if (state.token) {

@@ -1,4 +1,4 @@
-"""AgenticAI server: API + built-in web UI.
+"""JARVIS server: API + built-in web UI.
 
 End users need NO API key. The self-hoster configures a free-tier provider
 (Gemini / Groq / OpenRouter) server-side; everyone else just logs in.
@@ -582,6 +582,11 @@ def index() -> FileResponse:
     return FileResponse(WEBUI_DIR / "index.html")
 
 
+@app.get("/voice")
+def voice_page() -> FileResponse:
+    return FileResponse(WEBUI_DIR / "voice.html")
+
+
 @app.middleware("http")
 async def no_cache_static(request: Request, call_next):
     response = await call_next(request)
@@ -605,10 +610,10 @@ def main() -> None:
     have_password = bool(db.get_setting("admin_password")) or bool(settings.admin_token)
     if not have_password:
         print("=" * 60)
-        print(" AgenticAI is starting. No password is configured.")
+        print(" JARVIS is starting. No password is configured.")
         print(" Open the web UI and set an admin password (first-time setup).")
         print("=" * 60)
-    print(f" AgenticAI web UI + API:  http://127.0.0.1:{settings.port}")
+    print(f" JARVIS web UI + API:  http://127.0.0.1:{settings.port}")
     print(f" Workspace folder:        {settings.workspace}")
     uvicorn.run(app, host="0.0.0.0", port=settings.port, log_level="info")
 

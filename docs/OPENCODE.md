@@ -14,7 +14,7 @@ a free API key with **no credit card required** for the free models.
 Access is free for the models ending in `-free`. If a paid endpoint later
 asks for billing details, the `-free` models keep working without them.
 
-## Add it to AgenticAI
+## Add it to JARVIS
 
 The preset is already in the provider list after a restart:
 

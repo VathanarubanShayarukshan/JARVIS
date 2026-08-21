@@ -21,7 +21,7 @@ if [ ! -f ".env" ]; then
   cp .env.example .env
 fi
 
-echo "==> Starting AgenticAI at http://localhost:${PORT:-8000}"
+echo "==> Starting JARVIS at http://localhost:${PORT:-8000}"
 echo "    (first run: set your admin password in the browser, then add a free"
 echo "     provider key under Settings > Models - Gemini / Groq / OpenRouter / HF)"
 exec .venv/bin/python -m app.main

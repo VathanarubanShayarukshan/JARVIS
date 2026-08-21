@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgenticAI</title>
+<title>JARVIS</title>
 <link rel="stylesheet" href="/assets/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 </head>
@@ -12,7 +12,7 @@
 <!-- ---------- first-time setup ---------- -->
 <div id="setup-screen" class="center-screen hidden">
   <div class="card">
-    <h1>AgenticAI</h1>
+    <h1>JARVIS</h1>
     <p class="muted">Self-hosted agentic AI. No GPU needed — the server uses a free cloud model.</p>
     <label>Set an admin password</label>
     <input type="password" id="setup-password" placeholder="password">
@@ -24,7 +24,7 @@
 <!-- ---------- login ---------- -->
 <div id="login-screen" class="center-screen hidden">
   <div class="card">
-    <h1>AgenticAI</h1>
+    <h1>JARVIS</h1>
     <p class="muted">Sign in to your self-hosted agent.</p>
     <label>Admin password</label>
     <input type="password" id="login-password" placeholder="password">
@@ -61,9 +61,7 @@
           <option value="ta-IN">Tamil</option>
           <option value="hi-IN">Hindi</option>
         </select>
-        <button id="voice-btn" class="voice-btn ghost" title="Voice chat — speak, then say .over (walkie-talkie mode)">🎤</button>
         <select id="model-select" title="Model" class="model-select"></select>
-        <span id="online-dot" class="dot" title="connection"></span>
       </div>
     </header>
 
@@ -72,18 +70,20 @@
     <div class="composer-wrap">
       <div class="composer">
         <div id="attach-bar" class="attach-bar hidden"></div>
-        <textarea id="input" rows="1" placeholder="Ask anything — attach files, and download what the agent creates…"></textarea>
+        <div class="composer-input-row">
+          <button id="voice-btn" class="voice-btn ghost" title="Voice chat — tap to speak">🎤</button>
+          <textarea id="input" rows="1" placeholder="Ask JARVIS anything…"></textarea>
+          <button id="send-btn" class="primary send">Send ↵</button>
+        </div>
         <div class="composer-foot">
           <div class="composer-left">
             <input type="file" id="attach-input" class="file-input" multiple>
-            <button id="attach-btn" class="ghost attach-btn" title="Attach files (like WhatsApp)">📎</button>
+            <button id="attach-btn" class="ghost attach-btn" title="Attach files">📎</button>
             <span id="voice-status" class="voice-status hidden"></span>
             <label class="hint">
               <input type="checkbox" id="auto-title"> auto-title chats
             </label>
           </div>
-          <button id="send-btn" class="primary send">Send ↵</button>
-          <button id="stop-btn" class="stop hidden" title="Stop the current task" disabled>⏹ Stop</button>
         </div>
       </div>
       <p class="composer-note muted">Work happens in the server workspace: <span id="ws-path"></span></p>

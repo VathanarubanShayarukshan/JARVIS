@@ -1,4 +1,4 @@
-# AgenticAI
+# JARVIS
 
 A self-hosted agentic AI — like OpenCode/OpenWork, but running on **your server
 with a free cloud model** and a built-in web UI. No GPU, no Ollama, no local LLM
@@ -18,7 +18,7 @@ User -> Web UI (built in, served by the app)
 ## Why no local LLM?
 
 People running OpenCode/OpenWork-style agents on laptops can't run a good model
-locally (needs lots of CPU/GPU/RAM). AgenticAI fixes that:
+locally (needs lots of CPU/GPU/RAM). JARVIS fixes that:
 
 1. The **self-hoster adds one free-tier key** — Google Gemini, Groq, or
    OpenRouter all give free API keys (no credit card) and fast free models
@@ -190,7 +190,7 @@ is optional too; the server picks the first provider that has a key.
 `whatsapp/` contains a Baileys-based WhatsApp bot (Termux/Kali, Node 18+) that
 reuses all its modes (`.run` / `.send` / `.get` / `.brows`) and adds an
 **`.agent`** mode: it asks for a provider, a model (by number), and a task,
-then drives the AgenticAI API — with live status via `.pro`
+then drives the JARVIS API — with live status via `.pro`
 (`Thinking...`, `Running command: ...`) and long replies chunked for
 WhatsApp. See `whatsapp/README.md` for setup.
 

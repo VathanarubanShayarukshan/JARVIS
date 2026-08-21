@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AgenticAI launcher — self-hosted agentic AI with a built-in web UI.
+# JARVIS launcher — self-hosted agentic AI with a built-in web UI.
 #
 #   ./agentic.sh install      create venv, install deps, generate .env
 #   ./agentic.sh setup        guided first-run config (password + provider key)
@@ -85,7 +85,7 @@ do_start() {
     echo "Already running (pid $(cat "$PID_FILE")). Use 'restart' to bounce it."
     return 0
   fi
-  echo "==> Starting AgenticAI on http://localhost:$PORT   (workspace: $DATA_DIR/workspace)"
+  echo "==> Starting JARVIS on http://localhost:$PORT   (workspace: $DATA_DIR/workspace)"
   nohup env PORT="$PORT" DATA_DIR="$DATA_DIR" "$PY" -m app.main >>"$LOG_FILE" 2>>"$ERR_LOG" &
   echo $! > "$PID_FILE"
   sleep 2
@@ -152,7 +152,7 @@ case "${1:-help}" in
   logs)    do_logs "${2:-}" ;;
   update)  do_update ;;
   help|--help|-h|"") cat <<'EOF'
-AgenticAI — self-hosted agentic AI launcher
+JARVIS — self-hosted agentic AI launcher
 
 Usage:  ./agentic.sh <command> [args]
 

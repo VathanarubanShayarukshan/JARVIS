@@ -72,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
                 "function": {
                     "name": "write_file",
                     "arguments": json.dumps(
-                        {"path": "hello.txt", "content": "Hello from AgenticAI stub provider!\n"}
+                        {"path": "hello.txt", "content": "Hello from JARVIS stub provider!\n"}
                     ),
                 },
             }

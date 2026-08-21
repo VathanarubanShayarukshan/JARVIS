@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Bridge mode: BRIDGE_PORT set -> serve the login QR/status over HTTP so the
-// AgenticAI web app can show the login QR (Settings -> Bots).
+// JARVIS web app can show the login QR (Settings -> Bots).
 const BRIDGE_PORT = parseInt(process.env.BRIDGE_PORT || '', 10) || null;
 const bridge = { qr: null, state: 'starting', user: null, events: [], pairCode: null, pairNumber: null };
 let sock = null;
@@ -27,8 +27,8 @@ function evt(msg) {
 }
 
 // ============================================================
-// AgenticAI integration config
-//   AGENTIC_URL      -> your AgenticAI server (default localhost:8000)
+// JARVIS integration config
+//   AGENTIC_URL      -> your JARVIS server (default localhost:8000)
 //   AGENTIC_PASSWORD -> admin password for /api/auth/login
 //   (if your server runs with OPEN_ACCESS=true, no password is needed)
 // ============================================================
@@ -43,7 +43,7 @@ const qrcode = require('qrcode-terminal');
 const sessions = {};
 const botMessageIds = new Set(); // லூப் பிழைகளைத் தடுக்க தனித்துவமான மெசேஜ் ஐடி டிராக்கர்
 
-// ---------- AgenticAI helpers ----------
+// ---------- JARVIS helpers ----------
 let _agentToken = { token: null, at: 0 };
 
 async function agentToken() {
@@ -81,12 +81,12 @@ async function agentApi(endpoint, method = 'GET', body = null) {
 async function agentProviders() {
     try {
         const r = await agentApi('/api/providers');
-        if (r.status !== 200) return { error: `Cannot reach AgenticAI at ${AGENTIC_URL} (HTTP ${r.status}). Check AGENTIC_URL, password, and that the server is running.` };
+        if (r.status !== 200) return { error: `Cannot reach JARVIS at ${AGENTIC_URL} (HTTP ${r.status}). Check AGENTIC_URL, password, and that the server is running.` };
         const providers = (r.json || []).filter(p => p && Array.isArray(p.models) && p.models.length > 0);
-        if (!providers.length) return { error: 'AgenticAI has no provider with models. Add a key in Settings -> Models first.' };
+        if (!providers.length) return { error: 'JARVIS has no provider with models. Add a key in Settings -> Models first.' };
         return { providers };
     } catch (e) {
-        return { error: `Cannot reach AgenticAI at ${AGENTIC_URL}: ${e.message}` };
+        return { error: `Cannot reach JARVIS at ${AGENTIC_URL}: ${e.message}` };
     }
 }
 
@@ -105,12 +105,12 @@ function sendChunked(jid, text) {
     return Promise.all(parts.map(p => sendMessageSafe(jid, { text: p })));
 }
 
-// Streams an AgenticAI chat task; keeps the session's agent state (progress)
+// Streams an JARVIS chat task; keeps the session's agent state (progress)
 // updated so `.pro` can show live status. Returns final text or null if aborted.
 async function runAgentTask(agentState, taskText) {
     const r = await agentApi('/api/sessions', 'POST', {});
     if (r.status !== 200) {
-        agentState.progress = `AgenticAI error: cannot create session (HTTP ${r.status})`;
+        agentState.progress = `JARVIS error: cannot create session (HTTP ${r.status})`;
         return null;
     }
     agentState.sessionId = r.json.id;
@@ -133,13 +133,13 @@ async function runAgentTask(agentState, taskText) {
             signal: AbortSignal.timeout(AGENTIC_CHAT_TIMEOUT)
         });
     } catch (e) {
-        agentState.progress = 'AgenticAI error: ' + e.message;
+        agentState.progress = 'JARVIS error: ' + e.message;
         return null;
     }
     if (!res.ok) {
         let detail = '';
         try { detail = (await res.json()).detail || ''; } catch (e) {}
-        agentState.progress = `AgenticAI error: HTTP ${res.status} ${detail}`;
+        agentState.progress = `JARVIS error: HTTP ${res.status} ${detail}`;
         return null;
     }
 
@@ -171,12 +171,12 @@ async function runAgentTask(agentState, taskText) {
             } else if (ev.type === 'done') {
                 full = ev.content || full;
             } else if (ev.type === 'error') {
-                full = 'AgenticAI error: ' + ev.message;
+                full = 'JARVIS error: ' + ev.message;
             }
         }
     }
     if (agentState.aborted) return null;
-    return full || 'AgenticAI finished with no output.';
+    return full || 'JARVIS finished with no output.';
 }
 
 async function startBot() {
@@ -336,7 +336,7 @@ async function startBot() {
                                    `• *Flags Definition:*\n` +
                                    `  \`-p\` : ஸ்க்ரோல் அளவு (e.g., \`40%\` அல்லது \`3000\`. Default: \`30%\`)\n` +
                                    `  \`-d\` : லோடிங் தாமதம் மில்லிசெகண்டில் (Default: \`2000\`)\n\n` +
-                                   `🤖 *5. AGENT MODE (AgenticAI)*\n` +
+                                   `🤖 *5. AGENT MODE (JARVIS)*\n` +
                                    `• Format: \`.agent\`\n` +
                                    `• Picks a provider -> picks a model (by id) -> describe a task\n` +
                                    `• Replies with the agent's final output\n` +
@@ -353,7 +353,7 @@ async function startBot() {
                 }
 
                 if (text === '.pro') {
-                    // AGENT MODE: live status of the AgenticAI task
+                    // AGENT MODE: live status of the JARVIS task
                     if (currentSession.mode === 'agent') {
                         const a = currentSession.agent;
                         if (a.busy) {
@@ -380,7 +380,7 @@ async function startBot() {
                 }
 
                 if (text === '.kill') {
-                    // AGENT MODE: abort the running AgenticAI task
+                    // AGENT MODE: abort the running JARVIS task
                     if (currentSession.mode === 'agent') {
                         const a = currentSession.agent;
                         if (a.busy) {
@@ -449,7 +449,7 @@ async function startBot() {
                         text = text.slice(7).trim();
                     }
                     else if (text === '.agent' || text.startsWith('.agent ')) {
-                        // ================= AGENT MODE (AgenticAI) =================
+                        // ================= AGENT MODE (JARVIS) =================
                         currentSession.mode = 'agent';
                         const a = currentSession.agent;
                         a.aborted = false;
@@ -457,7 +457,7 @@ async function startBot() {
                         a.task = null;
                         a.sessionId = null;
                         a.progress = 'Loading model list...';
-                        await sendMessageSafe(from, { text: `🤖 *AGENT MODE ACTIVATED*\nConnecting to AgenticAI at \`${AGENTIC_URL}\` ...` });
+                        await sendMessageSafe(from, { text: `🤖 *AGENT MODE ACTIVATED*\nConnecting to JARVIS at \`${AGENTIC_URL}\` ...` });
 
                         const { providers, error } = await agentProviders();
                         if (error) {
@@ -503,7 +503,7 @@ async function startBot() {
                         }
                         a.model = a.models[n - 1];
                         a.step = 'task';
-                        await sendMessageSafe(from, { text: `🎯 Model *${a.model}* selected.\n\n📝 Now describe the task for AgenticAI:\n(e.g. "create a python script that prints fibonacci")` });
+                        await sendMessageSafe(from, { text: `🎯 Model *${a.model}* selected.\n\n📝 Now describe the task for JARVIS:\n(e.g. "create a python script that prints fibonacci")` });
                         continue;
                     }
                     if (a.step === 'task' && text) {

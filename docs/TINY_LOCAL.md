@@ -1,6 +1,6 @@
 # Local models: TinyAI (built-in) and Ollama
 
-You don't need any cloud key at all for light everyday use: AgenticAI ships
+You don't need any cloud key at all for light everyday use: JARVIS ships
 with a **zero-install local model** and can optionally drive a real local LLM
 via Ollama.
 
@@ -44,7 +44,7 @@ For real local intelligence (no internet, no key):
    ollama pull qwen2.5:0.5b
    ```
 3. Ollama serves an OpenAI-compatible API at `http://localhost:11434/v1`
-   automatically. AgenticAI auto-detects it (see Settings → Models — it
+   automatically. JARVIS auto-detects it (see Settings → Models — it
    appears as "Ollama (local, no key)" when it is running) and there is also
    a preset row with the tiny models `llama3.2:1b`, `qwen2.5:0.5b`,
    `phi3:mini`.

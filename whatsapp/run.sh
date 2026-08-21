@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the WhatsApp bot (Baileys) for AgenticAI.
-#   - reads AgenticAI server config from whatsapp/.env if present,
+# Run the WhatsApp bot (Baileys) for JARVIS.
+#   - reads JARVIS server config from whatsapp/.env if present,
 #     otherwise uses defaults
 #   - installs missing npm packages on first run
 #   - presses nothing: press Enter at the prompt for QR login
@@ -31,7 +31,7 @@ if [ "$MODE" = "bridge" ]; then
   export BRIDGE_PORT="${BRIDGE_PORT:-9511}"
   node index.js
 else
-  echo "==> AgenticAI server: ${AGENTIC_URL}"
+  echo "==> JARVIS server: ${AGENTIC_URL}"
   echo "==> Starting WhatsApp bot (press Enter at the prompt for QR login)"
   node index.js
 fi
