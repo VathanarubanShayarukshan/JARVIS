@@ -318,10 +318,10 @@ details.toolbar[open] summary { border-bottom: 1px solid var(--border); }
 .tool-row .running { color: var(--muted); animation: pulse 1s infinite; }
 button.stop { background: var(--danger); color: #fff; font-weight: 600; padding: 9px 14px; border-radius: 10px; }
 button.stop:hover { filter: brightness(1.15); }
-.composer-input-row { display: flex; align-items: stretch; gap: 6px; padding: 0 4px; }
+.composer-input-row { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .composer-input-row textarea { flex: 1; min-width: 0; max-height: 120px; resize: none; width: auto; padding: 10px 12px; margin: 0; border-radius: 10px; }
-.composer-input-row .voice-btn { font-size: 18px; padding: 0 10px; flex-shrink: 0; border-radius: 10px; }
-.composer-input-row .send { padding: 0 14px; border-radius: 10px; }
+.composer-input-row .voice-btn { font-size: 18px; padding: 10px 10px; flex-shrink: 0; border-radius: 10px; }
+.composer-input-row .send { padding: 10px 14px; border-radius: 10px; }
 button.send.stopping { background: var(--danger); }
 button.details-toggle { padding: 4px 9px; font-size: 12px; border-radius: 8px; opacity: .8; }
 button.details-toggle:hover { opacity: 1; }
