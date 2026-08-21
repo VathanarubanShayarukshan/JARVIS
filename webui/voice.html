@@ -70,6 +70,7 @@ let rec = null;
 let busy = false;
 let buffer = [];
 let currentLang = "en-US";
+let silenceTimer = null;
 
 const statusEl = document.getElementById("status");
 const transcriptEl = document.getElementById("transcript");
@@ -196,15 +197,25 @@ function listen() {
     }
     const shown = buffer.join(" ") + (interim ? " " + interim : "");
     transcriptEl.textContent = shown ? `"${shown}"` : "";
+
+    // reset silence timer — if user stops talking for 2s, auto-send
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+      if (!busy && buffer.join(" ").trim().length > 1) {
+        try { rec.stop(); } catch {}
+      }
+    }, 2000);
   };
 
   rec.onerror = (ev) => {
+    clearTimeout(silenceTimer);
     if (ev.error === "not-allowed") { setStatus("Microphone blocked — allow mic permission", ""); return; }
     if (busy) return;
     setTimeout(listen, 800);
   };
 
   rec.onend = () => {
+    clearTimeout(silenceTimer);
     if (busy) return;
     const text = buffer.join(" ").trim();
     buffer = [];
