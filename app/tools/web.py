@@ -48,7 +48,7 @@ def fetch_url(url: str, max_chars: int = 60000) -> dict:
     (HTML is stripped to readable text). Use to read public docs, pages, APIs."""
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
-            r = client.get(url, headers={"User-Agent": "Mozilla/5.0 agentic-ai"})
+            r = client.get(url, headers={"User-Agent": "Mozilla/5.0 jarvis"})
             if r.status_code >= 400:
                 return {"url": url, "status": r.status_code, "error": r.text[:500]}
             ctype = r.headers.get("content-type", "")
@@ -73,7 +73,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
             r = client.get(
                 "https://html.duckduckgo.com/html/",
                 params={"q": query},
-                headers={"User-Agent": "Mozilla/5.0 agentic-ai"},
+                headers={"User-Agent": "Mozilla/5.0 jarvis"},
             )
             if r.status_code != 200:
                 return {"query": query, "error": f"search failed: HTTP {r.status_code}"}

@@ -27,6 +27,7 @@ body{background:#0a0e17;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 .logo{font-size:64px;margin-bottom:10px;animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.7;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
 .hint{font-size:12px;color:#484f58;margin-top:24px}
+.hidden{display:none!important}
 #auth-overlay{position:fixed;inset:0;background:rgba(10,14,23,.95);display:flex;align-items:center;justify-content:center;z-index:100}
 #auth-overlay .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:340px;width:90%;text-align:center}
 #auth-overlay h2{margin-bottom:12px}
@@ -235,6 +236,7 @@ try {
 document.getElementById("auth-btn").onclick = async () => {
   const pass = document.getElementById("auth-pass").value;
   document.getElementById("auth-error").textContent = "";
+  if (!pass) { document.getElementById("auth-error").textContent = "enter password"; return; }
   try {
     const r = await apiCall("/api/auth/login", { method: "POST", body: { password: pass } });
     if (!r.ok) { document.getElementById("auth-error").textContent = "wrong password"; return; }
@@ -249,10 +251,11 @@ document.getElementById("auth-btn").onclick = async () => {
 };
 document.getElementById("auth-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("auth-btn").click(); });
 
-// if already logged in
+// if already logged in, check token validity
 if (token) {
   apiCall("/api/health").then((r) => {
     if (r.ok) document.getElementById("auth-overlay").classList.add("hidden");
+    else { token = ""; localStorage.removeItem("token"); }
   }).catch(() => {});
 }
 </script>
