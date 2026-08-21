@@ -27,37 +27,38 @@ RATE_LIMIT_RETRIES = 4
 
 def _next_provider(current_provider: Any) -> tuple[Any, str] | None:
     """Pick the next available provider + model when the current one fails.
-    Returns (provider, model_name) or None."""
-    from .database import get_setting
-    import json
+    Returns (provider, model_name) or None. Reads raw DB (with keys) for internal use."""
+    import json as _json
+    from .database import _lock, _conn
 
     try:
-        raw = get_setting("providers")
-        providers_list = json.loads(raw) if raw else []
+        with _lock, _conn() as db:
+            rows = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     except Exception:
         return None
 
     current_id = getattr(current_provider, "id", None)
 
-    for entry in providers_list:
-        pid = entry.get("id", "")
+    for r in rows:
+        d = dict(r)
+        pid = d.get("id")
         if pid == current_id:
             continue
-        name = entry.get("name", "")
-        base_url = entry.get("base_url", "")
-        models = entry.get("models") or []
-        api_key = entry.get("api_key", "")
+        name = d.get("name", "")
+        base_url = d.get("base_url", "")
+        api_key = d.get("api_key") or ""
+        models_raw = d.get("models") or "[]"
+        models = _json.loads(models_raw) if isinstance(models_raw, str) else models_raw
         if not base_url or not models:
             continue
-        # skip providers that also have no key (unless builtin)
-        if not api_key and not base_url.startswith("http://localhost"):
+        if not api_key and not base_url.startswith("http://localhost") and not base_url.startswith("builtin://"):
             continue
-        # Build a simple provider object
+
         class _P:
             pass
         p = _P()
         p.id = pid
-        p.name = name or pid
+        p.name = name or str(pid)
         p.base_url = base_url
         p.api_key = api_key
         p.models = models
@@ -144,10 +145,11 @@ async def run_agent(
                 except LLMError as e:
                     msg = str(e)
                     is_retryable = (
-                        "429" in msg or "rate" in msg.lower() or "quota" in msg.lower()
-                        or "limit" in msg.lower() or "404" in msg
+                        "429" in msg or "400" in msg or "rate" in msg.lower()
+                        or "quota" in msg.lower() or "limit" in msg.lower()
+                        or "404" in msg or "unavailable" in msg.lower()
                         or "model_not_found" in msg.lower() or "does not exist" in msg.lower()
-                        or "not have access" in msg.lower()
+                        or "not have access" in msg.lower() or "server_error" in msg.lower()
                     )
                     if not is_retryable or rate_retries <= 0 or len(accumulated_text) != base_text_len:
                         raise
