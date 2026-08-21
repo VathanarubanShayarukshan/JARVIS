@@ -110,6 +110,7 @@ button.primary {
   color: #fff;
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0,0,0,.3);
+  flex-shrink: 0;
 }
 button.primary:hover { filter: brightness(1.15); }
 button.ghost { background: none; }
@@ -317,9 +318,9 @@ details.toolbar[open] summary { border-bottom: 1px solid var(--border); }
 .tool-row .running { color: var(--muted); animation: pulse 1s infinite; }
 button.stop { background: var(--danger); color: #fff; font-weight: 600; padding: 9px 14px; border-radius: 10px; }
 button.stop:hover { filter: brightness(1.15); }
-.composer-input-row { display: flex; align-items: flex-end; gap: 6px; padding: 0 4px; }
-.composer-input-row textarea { flex: 1; min-width: 0; }
-.composer-input-row .voice-btn { font-size: 18px; padding: 8px 10px; }
+.composer-input-row { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
+.composer-input-row textarea { flex: 1; min-width: 0; max-height: 120px; resize: none; }
+.composer-input-row .voice-btn { font-size: 18px; padding: 8px 10px; flex-shrink: 0; }
 button.send.stopping { background: var(--danger); }
 button.details-toggle { padding: 4px 9px; font-size: 12px; border-radius: 8px; opacity: .8; }
 button.details-toggle:hover { opacity: 1; }
@@ -355,7 +356,7 @@ details.toolbar summary .hint { font-size: 10px; opacity: .7; }
   transition: border-color .15s, box-shadow .15s;
 }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,140,255,.12); }
-.composer textarea { border: none; background: none; resize: none; padding: 14px 16px 4px; max-height: 220px; }
+.composer textarea { border: none; background: none; resize: none; padding: 8px 16px 4px; max-height: 220px; }
 .composer textarea:focus { box-shadow: none; background: none; }
 
 .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 10px; }
