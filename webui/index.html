@@ -61,7 +61,6 @@
           <option value="ta-IN">Tamil</option>
           <option value="hi-IN">Hindi</option>
         </select>
-        <select id="model-select" title="Model" class="model-select"></select>
       </div>
     </header>
 
@@ -71,14 +70,15 @@
       <div class="composer">
         <div id="attach-bar" class="attach-bar hidden"></div>
         <div class="composer-input-row">
-          <button id="voice-btn" class="voice-btn ghost" title="Voice chat — tap to speak">🎤</button>
+          <input type="file" id="attach-input" class="file-input" multiple>
+          <button id="attach-btn" class="attach-plus" title="Attach files">+</button>
           <textarea id="input" rows="1" placeholder="Ask JARVIS anything…"></textarea>
-          <button id="send-btn" class="primary send">Send ↵</button>
+          <select id="model-select" class="model-pill" title="Choose model"></select>
+          <button id="voice-btn" class="voice-btn" title="Voice chat — tap to speak">🎤</button>
+          <button id="send-btn" class="send" title="Send message">↑</button>
         </div>
         <div class="composer-foot">
           <div class="composer-left">
-            <input type="file" id="attach-input" class="file-input" multiple>
-            <button id="attach-btn" class="ghost attach-btn" title="Attach files">📎</button>
             <span id="voice-status" class="voice-status hidden"></span>
             <label class="hint">
               <input type="checkbox" id="auto-title"> auto-title chats

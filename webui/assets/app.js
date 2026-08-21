@@ -423,7 +423,7 @@ async function send() {
 
   const ctrl = new AbortController();
   state.ctrl = ctrl;
-  $("send-btn").textContent = "⏹ Stop";
+  $("send-btn").textContent = "⏹";
   $("send-btn").classList.add("stopping");
 
   try {
@@ -471,7 +471,7 @@ async function send() {
   } finally {
     state.busy = false;
     state.ctrl = null;
-    $("send-btn").textContent = "Send ↵";
+    $("send-btn").textContent = "↑";
     $("send-btn").classList.remove("stopping");
     $("send-btn").disabled = false;
     $("input").focus();
