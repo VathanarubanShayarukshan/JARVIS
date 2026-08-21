@@ -30,6 +30,7 @@ def _next_provider(current_provider: Any) -> tuple[Any, str] | None:
     Returns (provider, model_name) or None. Reads raw DB (with keys) for internal use."""
     import json as _json
     from .database import _lock, _conn
+    from .llm import Provider
 
     try:
         with _lock, _conn() as db:
@@ -54,14 +55,7 @@ def _next_provider(current_provider: Any) -> tuple[Any, str] | None:
         if not api_key and not base_url.startswith("http://localhost") and not base_url.startswith("builtin://"):
             continue
 
-        class _P:
-            pass
-        p = _P()
-        p.id = pid
-        p.name = name or str(pid)
-        p.base_url = base_url
-        p.api_key = api_key
-        p.models = models
+        p = Provider(id=str(pid), name=name or str(pid), base_url=base_url, api_key=api_key, models=models)
         return (p, models[0])
 
     return None
