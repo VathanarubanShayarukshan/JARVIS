@@ -223,12 +223,15 @@ async function startBot() {
     };
 
     if (!sock.authState.creds.registered && phoneNumber) {
-        setTimeout(async () => {
+        const requestPairing = async () => {
             try {
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`\n🔑 YOUR VALID PAIRING CODE IS: \x1b[1;32m${code}\x1b[0m`);
-            } catch (e) { console.error(e); }
-        }, 4000);
+            } catch (e) { console.error(e.message || e); }
+        };
+        sock.ev.on('connection.update', (update) => {
+            if (update.connection === 'open') requestPairing();
+        });
     }
 
     sock.ev.on('creds.update', saveCreds);
