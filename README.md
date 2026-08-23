@@ -54,7 +54,7 @@ Requirements: Python 3.11+ (or Docker).
 
 Linux / macOS:
 ```bash
-git clone https://github.com/VathanarubanShayarukshan/my-agentic-ai.git
+git clone https://github.com/VathanarubanShayarukshan/JARVIS.git
 cd my-agentic-ai
 ./agentic.sh install     # venv + deps + .env
 ./agentic.sh start       # run in background

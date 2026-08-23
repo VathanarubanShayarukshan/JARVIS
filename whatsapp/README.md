@@ -8,7 +8,7 @@ new **`.agent`** mode that drives the JARVIS server.
 ```bash
 pkg install nodejs git   # or: apt install nodejs git
 mkdir -p ~/Termux && cd ~/Termux
-git clone https://github.com/VathanarubanShayarukshan/my-agentic-ai.git
+git clone https://github.com/VathanarubanShayarukshan/JARVIS.git
 cd my-agentic-ai/whatsapp
 npm init -y
 npm i @whiskeysockets/baileys pino puppeteer qrcode-terminal
