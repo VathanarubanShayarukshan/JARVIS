@@ -21,15 +21,11 @@ AUTH_HEADER=""
 if [ -f "$SESSION_FILE" ]; then
   SESSION_ID=$(cat "$SESSION_FILE")
   echo "📂 Reusing session: $SESSION_ID"
-  # Verify session exists
-  CHECK=$(curl -s "$BASE_URL/api/sessions/$SESSION_ID" -H "$AUTH_HEADER" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
-  if [ "$CHECK" != "$SESSION_ID" ]; then
-    echo "  Session expired, creating new one..."
-    rm -f "$SESSION_FILE"
-  fi
 fi
 
-if [ ! -f "$SESSION_FILE" ]; then
+if [ ! -z "$SESSION_ID" ]; then
+  true
+else
   SESSION_ID=$(curl -s -X POST "$BASE_URL/api/sessions" \
     -H "Content-Type: application/json" \
     -H "$AUTH_HEADER" \
