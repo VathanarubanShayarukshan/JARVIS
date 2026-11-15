@@ -1,6 +1,14 @@
 import os
 from pathlib import Path
 
+# httpx 0.28 crashes on IPv6 literals in NO_PROXY ("Invalid port: ':1]'").
+for _var in ("NO_PROXY", "no_proxy"):
+    _val = os.environ.get(_var)
+    if _val:
+        _clean = ",".join(e for e in _val.split(",") if "[" not in e and "::" not in e)
+        if _clean != _val:
+            os.environ[_var] = _clean
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
