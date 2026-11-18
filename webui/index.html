@@ -49,12 +49,21 @@
   <main class="main">
     <header class="topbar">
       <div class="topbar-left">
+        <select id="project-select" class="project-select" title="Project — attaches instructions + knowledge to this chat">
+          <option value="">No project</option>
+        </select>
         <select id="skill-select" class="skill-select" title="Skill">
           <option value="">No skill</option>
         </select>
         <span class="skill-hint-vbar"></span>
       </div>
       <div class="topbar-right">
+        <label class="switch-pill" title="Show the thinking / status indicator">
+          <input type="checkbox" id="toggle-thinking" checked><span class="sw"></span><span class="sw-label">Thinking</span>
+        </label>
+        <label class="switch-pill" title="Show the tool / process log">
+          <input type="checkbox" id="toggle-toollog" checked><span class="sw"></span><span class="sw-label">Tool log</span>
+        </label>
         <select id="voice-lang" class="voice-lang hidden" title="Voice language">
           <option value="en-US">English</option>
           <option value="en-IN">English (Tamil accented)</option>
@@ -67,6 +76,13 @@
     <div id="chat" class="chat"></div>
 
     <div class="composer-wrap">
+      <div id="bg-banner" class="bg-banner hidden">
+        <span class="bg-dot"></span>
+        <span id="bg-text">JARVIS is working in the background — you can safely close this window.</span>
+        <span class="flex-spacer"></span>
+        <button id="bg-resume" class="primary">Resume</button>
+        <button id="bg-stop" class="ghost">Stop</button>
+      </div>
       <div class="composer">
         <div id="attach-bar" class="attach-bar hidden"></div>
         <div class="composer-input-row">
@@ -75,6 +91,7 @@
           <textarea id="input" rows="1" placeholder="Ask JARVIS anything…"></textarea>
           <select id="model-select" class="model-pill" title="Choose model"></select>
           <button id="voice-btn" class="voice-btn" title="Voice chat — tap to speak">🎤</button>
+          <button id="push-btn" class="push hidden" title="Push to background — the task keeps running on the server, even if you close this window">⤓</button>
           <button id="send-btn" class="send" title="Send message">↑</button>
         </div>
         <div class="composer-foot">
@@ -99,6 +116,10 @@
       </div>
       <div class="modal-tabs">
         <button class="tab active" data-tab="models">Models</button>
+        <button class="tab" data-tab="mcp">MCP</button>
+        <button class="tab" data-tab="skills">Skills</button>
+        <button class="tab" data-tab="projects">Projects</button>
+        <button class="tab" data-tab="appearance">Appearance</button>
         <button class="tab" data-tab="tokens">API tokens</button>
         <button class="tab" data-tab="account">Account</button>
         <button class="tab" data-tab="files">Files</button>
@@ -122,6 +143,94 @@
           </div>
           <p id="probe-out" class="muted small"></p>
         </details>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-mcp">
+        <p class="muted small">Connect <b>MCP servers</b> to give JARVIS extra tools (GitHub, browsers, memory…). Ready-made presets install with <code>npx</code> — Node.js must be on the server. Their tools appear automatically in every chat.</p>
+        <div id="mcp-presets" class="preset-grid"></div>
+        <h3 class="section-title">Your servers</h3>
+        <div id="mcp-list"></div>
+        <details class="add-provider" id="mcp-custom">
+          <summary>+ Custom MCP server (any stdio command)</summary>
+          <div class="row">
+            <input id="mcp-name" placeholder="name (e.g. github)">
+            <input id="mcp-command" placeholder="command (npx / uvx / node / python)">
+          </div>
+          <div class="row">
+            <input id="mcp-args" placeholder="args, e.g. -y @modelcontextprotocol/server-github">
+          </div>
+          <textarea id="mcp-env" rows="3" placeholder="Environment variables, one per line: KEY=VALUE&#10;e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx"></textarea>
+          <div class="row">
+            <button id="mcp-test-btn">Test connection</button>
+            <button class="primary" id="mcp-add-btn">Add server</button>
+          </div>
+          <p id="mcp-out" class="muted small"></p>
+        </details>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-skills">
+        <p class="muted small">Skills are markdown instruction packs. Pick one in the top bar to prepend it to your next task. Create, edit, import or delete them here — changes apply instantly, no restart.</p>
+        <div class="row">
+          <button id="skill-new-btn" class="primary">+ New skill</button>
+          <label for="skill-import" class="upload-label">Import .md files</label>
+          <input type="file" id="skill-import" class="file-input" accept=".md,.txt" multiple>
+          <span id="skill-import-out" class="muted small"></span>
+        </div>
+        <div id="skill-list"></div>
+        <div id="skill-editor" class="hidden">
+          <div class="row">
+            <input id="skill-id" placeholder="skill id (auto from title if empty)">
+          </div>
+          <textarea id="skill-content" class="file-content" rows="12" placeholder="# My skill&#10;&#10;Step-by-step instructions the agent should follow…"></textarea>
+          <div class="row">
+            <button class="primary" id="skill-save-btn">Save skill</button>
+            <button id="skill-cancel-btn" class="ghost">Cancel</button>
+            <span id="skill-out" class="muted small"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-projects">
+        <p class="muted small">Projects bundle <b>instructions + knowledge files</b> (notes, docs, specs). Select a project in the top bar and every chat under it gets that context automatically.</p>
+        <div class="row">
+          <input id="proj-name" placeholder="New project name (e.g. My App)">
+          <button class="primary" id="proj-create-btn">Create project</button>
+        </div>
+        <div id="proj-list"></div>
+        <div id="proj-detail" class="hidden">
+          <div class="row">
+            <input id="proj-edit-name" placeholder="Project name">
+            <button id="proj-save-btn" class="primary">Save</button>
+            <button id="proj-delete-btn" class="ghost danger-text">Delete project</button>
+            <button id="proj-close-btn" class="ghost">Close</button>
+          </div>
+          <label class="field-label">Instructions (system-level guidance for this project)</label>
+          <textarea id="proj-instructions" rows="4" placeholder="e.g. This is a FastAPI app. Always run tests after changes. Reply in Tamil."></textarea>
+          <label class="field-label">Knowledge files</label>
+          <div class="row">
+            <label for="proj-file-input" class="upload-label">Upload text files</label>
+            <input type="file" id="proj-file-input" class="file-input" multiple>
+            <button id="proj-paste-btn">Paste text</button>
+            <span id="proj-file-out" class="muted small"></span>
+          </div>
+          <div id="proj-paste-box" class="hidden">
+            <div class="row"><input id="proj-paste-name" placeholder="name, e.g. notes.md"></div>
+            <textarea id="proj-paste-content" rows="5" placeholder="Paste knowledge / documentation text here"></textarea>
+            <div class="row"><button id="proj-paste-save" class="primary">Add knowledge</button></div>
+          </div>
+          <ul id="proj-files" class="plain-list"></ul>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-appearance">
+        <label class="field-label">Theme</label>
+        <div id="theme-grid" class="theme-grid"></div>
+        <label class="field-label">Accent color</label>
+        <div class="row">
+          <input type="color" id="accent-picker" value="#4f8cff">
+          <button id="accent-reset" class="ghost">Reset accent</button>
+        </div>
+        <p class="muted small">Appearance is saved in this browser only.</p>
       </div>
 
       <div class="tab-panel hidden" id="tab-tokens">

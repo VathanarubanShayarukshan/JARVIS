@@ -22,12 +22,16 @@ const state = {
   sessionId: null,
   sessions: [],
   providers: [],
+  projects: [],
+  jobs: [],
   busy: false,
   autoTitle: true,
   modelKey: localStorage.getItem("modelKey") || "",
   modelPrefs: JSON.parse(localStorage.getItem("modelPrefs") || "{}"),
   abort: null,
   ctrl: null,
+  jobId: null,
+  detached: false,
   pendingFiles: [], // {name, file} waiting to be attached to the next message
 };
 
@@ -95,14 +99,21 @@ async function boot() {
   }
 }
 
+async function enterApp() {
+  await loadAll();
+  showScreen("app");
+  const saved = localStorage.getItem("session");
+  if (saved && state.sessions.some((s) => s.id === saved)) await selectSession(saved);
+  else await newSession();
+}
+
 $("setup-btn").onclick = async () => {
   const r = await api("/api/auth/setup", { method: "POST", body: { password: $("setup-password").value } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $("setup-error").textContent = j.detail || "failed"; return; }
   state.token = j.token;
   localStorage.setItem("token", j.token);
-  await loadAll();
-  showScreen("app");
+  await enterApp();
 };
 
 $("login-btn").onclick = async () => {
@@ -111,8 +122,7 @@ $("login-btn").onclick = async () => {
   if (!r.ok) { $("login-error").textContent = j.detail || "failed"; return; }
   state.token = j.token;
   localStorage.setItem("token", j.token);
-  await loadAll();
-  showScreen("app");
+  await enterApp();
 };
 $("login-password").addEventListener("keydown", (e) => e.key === "Enter" && $("login-btn").click());
 $("setup-password").addEventListener("keydown", (e) => e.key === "Enter" && $("setup-btn").click());
@@ -124,7 +134,44 @@ $("logout-btn").onclick = () => {
 };
 
 async function loadAll() {
-  await Promise.all([loadSessions(), loadProviders(), loadModels(), loadSkills()]);
+  await Promise.all([loadSessions(), loadProviders(), loadModels(), loadSkills(), loadProjects(), loadJobs()]);
+}
+
+async function loadProjects() {
+  const sel = $("project-select");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">No project</option>';
+  try {
+    state.projects = await json(await api("/api/projects"));
+    for (const p of state.projects) {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = "📁 " + p.name;
+      sel.appendChild(o);
+    }
+  } catch { state.projects = []; }
+  sel.value = keep;
+}
+
+$("project-select").onchange = async () => {
+  if (!state.sessionId) return;
+  await api(`/api/sessions/${state.sessionId}/project`, {
+    method: "POST",
+    body: { project_id: $("project-select").value || null },
+  });
+  await loadSessions();
+};
+
+async function loadJobs() {
+  try {
+    state.jobs = await json(await api("/api/jobs"));
+  } catch { state.jobs = []; }
+  renderSessions();
+  updateBanner();
+}
+
+function runningJobFor(sessionId) {
+  return state.jobs.find((j) => j.session_id === sessionId && j.status === "running") || null;
 }
 
 async function loadSkills() {
@@ -166,6 +213,12 @@ function renderSessions() {
     title.className = "session-title";
     title.textContent = s.title || "Untitled";
     item.appendChild(title);
+    if (runningJobFor(s.id)) {
+      const dot = document.createElement("span");
+      dot.className = "run-dot";
+      dot.title = "Working in background";
+      item.appendChild(dot);
+    }
     item.onclick = () => selectSession(s.id);
     const del = document.createElement("button");
     del.className = "del";
@@ -176,6 +229,7 @@ function renderSessions() {
       await api("/api/sessions/" + s.id, { method: "DELETE" });
       if (state.sessionId === s.id) { state.sessionId = null; renderChat(null); }
       await loadSessions();
+      await loadJobs();
     };
     item.appendChild(del);
     list.appendChild(item);
@@ -183,22 +237,32 @@ function renderSessions() {
 }
 
 async function newSession() {
-  const s = await json(await api("/api/sessions", { method: "POST" }));
+  const s = await json(await api("/api/sessions", {
+    method: "POST",
+    body: { project_id: $("project-select").value || null },
+  }));
   state.sessionId = s.id;
   localStorage.setItem("session", s.id);
   await loadSessions();
   applyModelPrefFor(s.id);
   renderChat([]);
+  updateBanner();
   $("input").focus();
 }
 
 async function selectSession(id) {
+  if (state.busy && state.jobId && state.sessionId !== id) pushToBackground(true);
   state.sessionId = id;
   localStorage.setItem("session", id);
   const msgs = await json(await api(`/api/sessions/${id}/messages`));
+  const sess = state.sessions.find((s) => s.id === id);
+  $("project-select").value = (sess && sess.project_id) || "";
   applyModelPrefFor(id);
   renderChat(msgs);
   renderSessions();
+  await loadJobs();
+  const job = runningJobFor(id);
+  if (job && !state.busy) await resumeJob(job.id);
 }
 
 $("new-chat-btn").onclick = newSession;
@@ -267,56 +331,50 @@ function appendMsg(role) {
   return { div, body, activity };
 }
 
-/* compact "working" indicator + collapsible tool log (hidden by default) */
+/* modern collapsible "thinking / process" block, like other agent apps */
 function fmtArgs(args) {
   if (args == null) return "";
   if (typeof args === "string") return args;
   try { return JSON.stringify(args, null, 1); } catch { return String(args); }
 }
 function makeActivity(activity) {
-  const pill = document.createElement("div");
-  pill.className = "act-pill";
-  pill.innerHTML = '<span class="spin">⚙</span><span class="txt">working…</span>';
-  activity.appendChild(pill);
+  const started = Date.now();
   activity.classList.remove("hidden");
+  activity.classList.add("activity");
 
-  const toggleBtn = document.createElement("button");
-  toggleBtn.className = "details-toggle hidden";
-  toggleBtn.textContent = "⚙ expand tool details";
-  toggleBtn.title = "Show/hide what tools ran and what commands they executed";
-  activity.appendChild(toggleBtn);
+  const head = document.createElement("button");
+  head.className = "act-head";
+  head.type = "button";
+  head.innerHTML =
+    '<span class="act-status"><span class="act-ico spin">◐</span><span class="act-txt">Thinking…</span></span>' +
+    '<span class="act-count"></span><span class="act-chev">▸</span>';
+  activity.appendChild(head);
 
-  const toolbar = document.createElement("details");
-  toolbar.className = "toolbar";
-  toolbar.hidden = true;
-  const summary = document.createElement("summary");
-  toolbar.appendChild(summary);
+  const panel = document.createElement("div");
+  panel.className = "act-panel";
   const list = document.createElement("div");
   list.className = "tool-list";
-  toolbar.appendChild(list);
-  activity.appendChild(toolbar);
-  let rows = [];
+  panel.appendChild(list);
+  activity.appendChild(panel);
 
-  function refreshToggle() {
-    const open = rows.every((r) => r.row.classList.contains("details-open"));
-    toggleBtn.textContent = open && rows.length ? "⚙ collapse tool details" : "⚙ expand tool details";
+  head.onclick = () => activity.classList.toggle("open");
+
+  const txt = head.querySelector(".act-txt");
+  const ico = head.querySelector(".act-ico");
+  const count = head.querySelector(".act-count");
+  let rows = [];
+  let finished = false;
+
+  function refreshCount() {
+    count.textContent = rows.length ? `${rows.length} tool${rows.length === 1 ? "" : "s"}` : "";
+    head.classList.toggle("has-tools", rows.length > 0);
   }
-  toggleBtn.onclick = () => {
-    rows.forEach((r) => r.row.classList.toggle("details-open"));
-    refreshToggle();
-  };
 
   return {
-    status: (txt) => {
-      if (toolbar.hidden) {
-        pill.hidden = false;
-        pill.querySelector(".txt").textContent = txt;
-      }
-    },
-    dismiss: () => pill.hidden = true,
+    status: (m) => { if (!finished) txt.textContent = m; },
+    dismiss: () => { if (!finished) { txt.textContent = "Writing answer…"; ico.classList.remove("spin"); ico.textContent = "✎"; } },
     addTool: (name, args) => {
-      pill.hidden = false;
-      pill.querySelector(".txt").textContent = "running " + name + "…";
+      if (!finished) { ico.classList.add("spin"); ico.textContent = "◐"; txt.textContent = "Running " + name + "…"; }
       const row = document.createElement("div");
       row.className = "tool-row";
       const argText = fmtArgs(args);
@@ -326,16 +384,10 @@ function makeActivity(activity) {
         (argText ? `<div class="d-label">input</div><pre>${esc(argText)}</pre>` : "") +
         `<div class="d-label">result</div><pre class="t-result">…</pre>` +
         `</div>`;
-      row.onclick = () => {
-        row.classList.toggle("details-open");
-        refreshToggle();
-      };
+      row.onclick = () => row.classList.toggle("details-open");
       list.appendChild(row);
       rows.push({ row, result: row.querySelector(".t-result") });
-      toolbar.hidden = false;
-      toolbar.open = false;
-      toggleBtn.classList.remove("hidden");
-      refreshToggle();
+      refreshCount();
     },
     toolDone: (name, ok, result) => {
       const r = rows[rows.length - 1];
@@ -347,15 +399,25 @@ function makeActivity(activity) {
         r.result.textContent = res.length > 600 ? res.slice(0, 600) + "\n…(truncated)" : res;
         r.row.querySelector(".tname").textContent = (ok ? "✓" : "✕") + " " + name;
       }
-      pill.hidden = true;
     },
     finish: () => {
-      pill.hidden = true;
-      toolbar.hidden = false;
-      toolbar.open = false;
-      const c = rows.length;
-      summary.innerHTML = `⚙ ${c} tool call${c === 1 ? "" : "s"} <span class="hint">— tap title, or the button above, to view inputs/outputs (commands that ran)</span>`;
-      refreshToggle();
+      finished = true;
+      const secs = Math.max(1, Math.round((Date.now() - started) / 1000));
+      ico.classList.remove("spin");
+      ico.textContent = "✓";
+      head.classList.add("done");
+      txt.textContent = rows.length
+        ? `Worked for ${secs}s · ${rows.length} tool call${rows.length === 1 ? "" : "s"}`
+        : "Done";
+      refreshCount();
+      count.textContent = "";
+    },
+    fail: () => {
+      finished = true;
+      ico.classList.remove("spin");
+      ico.textContent = "✕";
+      head.classList.add("done", "failed");
+      txt.textContent = "Stopped";
     },
     rows,
   };
@@ -365,15 +427,86 @@ function scrollChat() {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-/* ---------------- sending ---------------- */
+/* ---------------- sending + background jobs ---------------- */
+
+function setBusyUI(busy) {
+  state.busy = busy;
+  $("send-btn").textContent = busy ? "⏹" : "↑";
+  $("send-btn").classList.toggle("stopping", busy);
+  $("send-btn").title = busy ? "Stop the task" : "Send message";
+  $("push-btn").classList.toggle("hidden", !busy);
+}
+
+function updateBanner() {
+  const banner = $("bg-banner");
+  const job = state.sessionId ? runningJobFor(state.sessionId) : null;
+  if (job && !state.busy) {
+    banner.dataset.job = job.id;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+function pushToBackground() {
+  if (!state.busy || !state.ctrl) return;
+  state.detached = true;
+  state.ctrl.abort();
+}
+
+$("push-btn").onclick = pushToBackground;
+$("bg-resume").onclick = () => {
+  const id = $("bg-banner").dataset.job;
+  if (id) resumeJob(id);
+};
+$("bg-stop").onclick = async () => {
+  const id = $("bg-banner").dataset.job;
+  if (!id) return;
+  await api(`/api/jobs/${id}/stop`, { method: "POST" }).catch(() => {});
+  await loadJobs();
+};
+
+async function readSSE(r, asBody) {
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (!dataLine) continue;
+      let ev;
+      try { ev = JSON.parse(dataLine.slice(6)); } catch { continue; }
+      handleEvent(ev, asBody);
+    }
+  }
+}
+
+function detachedNote(asBody) {
+  const note = document.createElement("div");
+  note.className = "bg-note muted small";
+  note.textContent = "⤓ Continuing in the background — you can close this window. Resume from the banner above the input box.";
+  asBody.appendChild(note);
+  if (uiState.activity) uiState.activity.status("Working in background…");
+}
 
 async function send() {
   const input = $("input");
   const text = input.value.trim();
   const attachments = state.pendingFiles.slice();
   if ((!text && !attachments.length) || !state.sessionId || state.busy) return;
-  state.busy = true;
-  $("send-btn").disabled = true;
+  if (runningJobFor(state.sessionId)) {
+    alert("A task is already running in this chat — resume it from the banner, or stop it first.");
+    return;
+  }
+  setBusyUI(true);
+  state.detached = false;
+  state.jobId = null;
 
   // WhatsApp-style: upload attached files to attachments/<session>/
   let attachedPaths = [];
@@ -392,8 +525,7 @@ async function send() {
       $("attach-bar").appendChild(Object.assign(document.createElement("span"), {
         className: "att-err muted small", textContent: "upload failed: " + e.message,
       }));
-      state.busy = false;
-      $("send-btn").disabled = false;
+      setBusyUI(false);
       return;
     }
   }
@@ -423,8 +555,6 @@ async function send() {
 
   const ctrl = new AbortController();
   state.ctrl = ctrl;
-  $("send-btn").textContent = "⏹";
-  $("send-btn").classList.add("stopping");
 
   try {
     const r = await api("/api/chat", {
@@ -443,46 +573,100 @@ async function send() {
       const j = await r.json().catch(() => ({}));
       throw new Error(j.detail || "chat failed");
     }
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
-        const frame = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
-        if (!dataLine) continue;
-        let ev;
-        try { ev = JSON.parse(dataLine.slice(6)); } catch { continue; }
-        handleEvent(ev, asBody);
-      }
-    }
+    await readSSE(r, asBody);
   } catch (e) {
-    if (ctrl.signal.aborted) {
-      asBody.innerHTML = `<span class="error">⏹ Stopped by you.</span>`;
-      uiState.activity && uiState.activity.finish && uiState.activity.finish();
+    if (ctrl.signal.aborted && state.detached) {
+      detachedNote(asBody);
+    } else if (ctrl.signal.aborted) {
+      asBody.innerHTML = `<span class="error">⏹ Stopped.</span>`;
+      if (uiState.activity) uiState.activity.fail();
     } else {
       asBody.innerHTML = `<span class="error">Error: ${esc(e.message)}</span>`;
+      if (uiState.activity) uiState.activity.fail();
     }
   } finally {
-    state.busy = false;
     state.ctrl = null;
-    $("send-btn").textContent = "↑";
-    $("send-btn").classList.remove("stopping");
-    $("send-btn").disabled = false;
-    $("input").focus();
+    setBusyUI(false);
+    if (!state.detached) { state.jobId = null; $("input").focus(); }
+    loadJobs();
   }
 }
 
-$("send-btn").onclick = () => { if (state.busy && state.ctrl) { state.ctrl.abort(); state.ctrl = null; } else { send(); } };
+async function resumeJob(jobId) {
+  if (state.busy) return;
+  const job = state.jobs.find((j) => j.id === jobId);
+  const sid = job ? job.session_id : state.sessionId;
+  if (!sid) return;
+  if (sid !== state.sessionId) {
+    state.sessionId = sid;
+    localStorage.setItem("session", sid);
+    const sess = state.sessions.find((s) => s.id === sid);
+    $("project-select").value = (sess && sess.project_id) || "";
+    applyModelPrefFor(sid);
+    renderSessions();
+  }
+  try {
+    state.jobs = await json(await api("/api/jobs"));
+  } catch { /* keep cached list */ }
+  const fresh = state.jobs.find((j) => j.id === jobId);
+  const msgs = await json(await api(`/api/sessions/${sid}/messages`));
+  renderChat(msgs);
+  if (!fresh || fresh.status !== "running") {
+    updateBanner();
+    return;
+  }
+  setBusyUI(true);
+  state.detached = false;
+  state.jobId = jobId;
+  updateBanner();
+
+  const { body: asBody, activity: asActivity } = appendMsg("assistant");
+  uiState.activity = makeActivity(asActivity);
+  uiState.answer = "";
+  uiState.toolCount = 0;
+
+  const ctrl = new AbortController();
+  state.ctrl = ctrl;
+  try {
+    const r = await api(`/api/jobs/${jobId}/stream?after=0`, { signal: ctrl.signal });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.detail || "cannot resume this task");
+    }
+    await readSSE(r, asBody);
+  } catch (e) {
+    if (ctrl.signal.aborted && state.detached) {
+      detachedNote(asBody);
+    } else if (!ctrl.signal.aborted) {
+      asBody.innerHTML = `<span class="error">Error: ${esc(e.message)}</span>`;
+      if (uiState.activity) uiState.activity.fail();
+    }
+  } finally {
+    state.ctrl = null;
+    setBusyUI(false);
+    if (!state.detached) state.jobId = null;
+    loadJobs();
+  }
+}
+
+$("send-btn").onclick = async () => {
+  if (state.busy) {
+    if (state.jobId) {
+      await api(`/api/jobs/${state.jobId}/stop`, { method: "POST" }).catch(() => {});
+    } else if (state.ctrl) {
+      state.ctrl.abort();
+    }
+  } else {
+    send();
+  }
+};
 
 function handleEvent(ev, asBody) {
   const a = uiState.activity;
   switch (ev.type) {
+    case "job":
+      state.jobId = ev.id;
+      break;
     case "status":
       a.status(ev.message);
       break;
@@ -501,11 +685,11 @@ function handleEvent(ev, asBody) {
       a.toolDone(ev.name, !String(ev.result).startsWith("Error"), ev.result);
       break;
     case "done":
-      a.finish();
+      if (ev.stopped) a.fail(); else a.finish();
       if (ev.content) {
         uiState.answer = ev.content;
         asBody.innerHTML = renderMarkdown(ev.content);
-        Voice.speakReply(ev.content);
+        if (!ev.stopped) Voice.speakReply(ev.content);
       }
       if (ev.files && ev.files.length) {
         const wrap = document.createElement("div");
@@ -517,11 +701,11 @@ function handleEvent(ev, asBody) {
           }).join("");
         asBody.appendChild(wrap);
       }
-      if (state.autoTitle) autoTitle();
+      if (state.autoTitle && !ev.stopped) autoTitle();
       scrollChat();
       break;
     case "error":
-      a.finish();
+      a.fail();
       asBody.innerHTML = `<span class="error">${esc(ev.message)}</span>`;
       Voice.speakReply("Error: " + ev.message);
       scrollChat();
@@ -622,12 +806,31 @@ input.addEventListener("keydown", (e) => {
     send();
   }
 });
-$("send-btn").onclick = send;
 $("auto-title").checked = localStorage.getItem("autoTitle") !== "0";
 $("auto-title").onchange = (e) => {
   state.autoTitle = e.target.checked;
   localStorage.setItem("autoTitle", e.target.checked ? "1" : "0");
 };
+
+/* ---- thinking / tool log visibility switches ---- */
+
+function applyLogToggles() {
+  const think = localStorage.getItem("showThinking") !== "0";
+  const toollog = localStorage.getItem("showToolLog") !== "0";
+  $("toggle-thinking").checked = think;
+  $("toggle-toollog").checked = toollog;
+  document.body.classList.toggle("hide-thinking", !think);
+  document.body.classList.toggle("hide-toollog", !toollog);
+}
+$("toggle-thinking").onchange = (e) => {
+  localStorage.setItem("showThinking", e.target.checked ? "1" : "0");
+  applyLogToggles();
+};
+$("toggle-toollog").onchange = (e) => {
+  localStorage.setItem("showToolLog", e.target.checked ? "1" : "0");
+  applyLogToggles();
+};
+applyLogToggles();
 
 /* ---- WhatsApp-style attachments ---- */
 
@@ -838,6 +1041,10 @@ document.querySelectorAll(".tab").forEach((t) =>
     $("tab-" + t.dataset.tab).classList.remove("hidden");
     if (t.dataset.tab === "files") loadFileTree();
     if (t.dataset.tab === "bots") loadIntegrations();
+    if (t.dataset.tab === "mcp") loadMcpTab();
+    if (t.dataset.tab === "skills") loadSkillsTab();
+    if (t.dataset.tab === "projects") loadProjectsTab();
+    if (t.dataset.tab === "appearance") renderAppearance();
   }
 );
 
@@ -1181,14 +1388,480 @@ $("file-upload-btn").onclick = async () => {
   }
 };
 
+/* ---------------- MCP servers tab ---------------- */
+
+let mcpPresets = [];
+
+function splitArgs(text) {
+  return (String(text || "").match(/"[^"]*"|\S+/g) || []).map((s) => s.replace(/^"|"$/g, ""));
+}
+
+function parseEnvText(text) {
+  const env = {};
+  for (const line of String(text || "").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    if (i > 0) env[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+  }
+  return env;
+}
+
+function mcpFormBody() {
+  return {
+    name: $("mcp-name").value.trim(),
+    command: $("mcp-command").value.trim(),
+    args: splitArgs($("mcp-args").value),
+    env: parseEnvText($("mcp-env").value),
+  };
+}
+
+async function loadMcpTab() {
+  const data = await json(await api("/api/mcp"));
+  mcpPresets = data.presets || [];
+  const grid = $("mcp-presets");
+  grid.innerHTML = "";
+  for (const p of mcpPresets) {
+    const card = document.createElement("div");
+    card.className = "preset-card";
+    card.innerHTML =
+      `<div class="preset-name">${esc(p.name)}</div>` +
+      `<p class="muted small">${esc(p.description)}</p>` +
+      `<code class="preset-cmd">${esc(p.command + " " + (p.args || []).join(" "))}</code>`;
+    const btn = document.createElement("button");
+    btn.textContent = "+ Add";
+    btn.onclick = () => {
+      $("mcp-custom").open = true;
+      $("mcp-name").value = p.name;
+      $("mcp-command").value = p.command;
+      $("mcp-args").value = (p.args || []).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
+      $("mcp-env").value = Object.entries(p.env || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+      $("mcp-out").textContent = (p.needs_env && p.needs_env.length)
+        ? "Fill in " + p.needs_env.join(", ") + " above, then click Add server."
+        : "Ready — click Add server.";
+      $("mcp-custom").scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    card.appendChild(btn);
+    grid.appendChild(card);
+  }
+  renderMcpServers(data.servers || []);
+}
+
+function renderMcpServers(servers) {
+  const list = $("mcp-list");
+  list.innerHTML = servers.length ? "" : '<p class="muted small">No MCP servers yet — add a preset above or a custom command below.</p>';
+  for (const s of servers) {
+    const item = document.createElement("div");
+    item.className = "provider-item";
+    item.innerHTML =
+      `<div class="p-head"><span class="p-name">${esc(s.name)}</span><span class="p-badge">${esc(s.command)}</span><span style="flex:1"></span></div>` +
+      `<p class="p-hint mono">${esc(s.command + " " + (s.args || []).join(" "))}</p>` +
+      `<div class="row mcp-actions"></div><p class="muted small mcp-out"></p>`;
+    const actions = item.querySelector(".mcp-actions");
+    const enable = document.createElement("label");
+    enable.className = "hint";
+    enable.innerHTML = `<input type="checkbox" ${s.enabled ? "checked" : ""}> enabled`;
+    enable.querySelector("input").onchange = async (e) => {
+      await api("/api/mcp/" + s.id, { method: "PUT", body: { enabled: e.target.checked } });
+    };
+    const test = document.createElement("button");
+    test.textContent = "Test";
+    test.onclick = async () => {
+      const out = item.querySelector(".mcp-out");
+      out.textContent = "testing… (the first npx run downloads the package, give it a minute)";
+      const r = await api(`/api/mcp/${s.id}/test`, { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      out.textContent = j.ok
+        ? `✓ ${j.tools.length} tools: ` + j.tools.map((t) => t.name).slice(0, 12).join(", ")
+        : "✕ " + (j.error || "failed");
+    };
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.className = "ghost danger-text";
+    del.onclick = async () => {
+      await api("/api/mcp/" + s.id, { method: "DELETE" });
+      loadMcpTab();
+    };
+    actions.append(enable, test, del);
+    list.appendChild(item);
+  }
+}
+
+$("mcp-test-btn").onclick = async () => {
+  const body = mcpFormBody();
+  if (!body.name || !body.command) { $("mcp-out").textContent = "name and command required"; return; }
+  $("mcp-out").textContent = "testing… (the first npx run downloads the package, give it a minute)";
+  const r = await api("/api/mcp/test", { method: "POST", body });
+  const j = await r.json().catch(() => ({}));
+  $("mcp-out").textContent = j.ok
+    ? `✓ connected — ${j.tools.length} tools: ` + j.tools.map((t) => t.name).slice(0, 12).join(", ")
+    : "✕ " + (j.error || j.detail || "failed");
+};
+
+$("mcp-add-btn").onclick = async () => {
+  const body = mcpFormBody();
+  if (!body.name || !body.command) { $("mcp-out").textContent = "name and command required"; return; }
+  const r = await api("/api/mcp", { method: "POST", body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("mcp-out").textContent = j.detail || "failed"; return; }
+  $("mcp-out").textContent = "added ✓ — its tools are available in the next chat";
+  $("mcp-name").value = ""; $("mcp-command").value = ""; $("mcp-args").value = ""; $("mcp-env").value = "";
+  loadMcpTab();
+};
+
+/* ---------------- skills tab ---------------- */
+
+let editingSkill = null;
+
+async function loadSkillsTab() {
+  const skills = await json(await api("/api/skills"));
+  const list = $("skill-list");
+  list.innerHTML = "";
+  for (const s of skills) {
+    const item = document.createElement("div");
+    item.className = "provider-item";
+    item.innerHTML =
+      `<div class="p-head"><span class="p-name">${esc(s.title)}</span><span class="p-badge">${esc(s.id)}</span><span style="flex:1"></span></div>` +
+      `<p class="p-hint">${esc(s.description || "")}</p>`;
+    const row = document.createElement("div");
+    row.className = "row";
+    const edit = document.createElement("button");
+    edit.textContent = "Edit";
+    edit.onclick = async () => {
+      const j = await json(await api("/api/skills/" + s.id));
+      editingSkill = s.id;
+      $("skill-id").value = s.id;
+      $("skill-id").disabled = true;
+      $("skill-content").value = j.content;
+      $("skill-out").textContent = "";
+      $("skill-editor").classList.remove("hidden");
+      $("skill-editor").scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.className = "ghost danger-text";
+    del.onclick = async () => {
+      if (!confirm(`Delete skill "${s.title}"?`)) return;
+      await api("/api/skills/" + s.id, { method: "DELETE" });
+      loadSkillsTab();
+      loadSkills();
+    };
+    row.append(edit, del);
+    item.appendChild(row);
+    list.appendChild(item);
+  }
+}
+
+$("skill-new-btn").onclick = () => {
+  editingSkill = null;
+  $("skill-id").value = "";
+  $("skill-id").disabled = false;
+  $("skill-content").value = "";
+  $("skill-out").textContent = "";
+  $("skill-editor").classList.remove("hidden");
+  $("skill-content").focus();
+};
+$("skill-cancel-btn").onclick = () => $("skill-editor").classList.add("hidden");
+
+$("skill-save-btn").onclick = async () => {
+  const content = $("skill-content").value.trim();
+  if (!content) { $("skill-out").textContent = "write some content first"; return; }
+  let r;
+  if (editingSkill) {
+    r = await api("/api/skills/" + editingSkill, { method: "PUT", body: { content } });
+  } else {
+    const titleM = content.match(/^#+\s+(.+)/m);
+    r = await api("/api/skills", {
+      method: "POST",
+      body: { id: $("skill-id").value.trim(), title: titleM ? titleM[1] : "", content },
+    });
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("skill-out").textContent = j.detail || "failed"; return; }
+  $("skill-editor").classList.add("hidden");
+  loadSkillsTab();
+  loadSkills();
+};
+
+$("skill-import").onchange = async () => {
+  const files = [...$("skill-import").files];
+  let ok = 0;
+  const errs = [];
+  for (const f of files) {
+    const text = await f.text();
+    const id = f.name.replace(/\.(md|txt)$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "skill";
+    const r = await api("/api/skills", { method: "POST", body: { id, content: text } });
+    if (r.ok) ok++;
+    else {
+      const j = await r.json().catch(() => ({}));
+      errs.push(`${f.name}: ${j.detail || "failed"}`);
+    }
+  }
+  $("skill-import").value = "";
+  $("skill-import-out").textContent = `imported ${ok}/${files.length}` + (errs.length ? " — " + errs.join("; ") : "");
+  loadSkillsTab();
+  loadSkills();
+};
+
+/* ---------------- projects tab ---------------- */
+
+let openProject = null;
+
+async function loadProjectsTab() {
+  const projects = await json(await api("/api/projects"));
+  const list = $("proj-list");
+  list.innerHTML = projects.length ? "" : '<p class="muted small">No projects yet. Create one, add knowledge, then pick it in the top bar.</p>';
+  for (const p of projects) {
+    const item = document.createElement("div");
+    item.className = "provider-item";
+    item.innerHTML =
+      `<div class="p-head"><span class="p-name">📁 ${esc(p.name)}</span>` +
+      `<span class="p-badge">${p.file_count} knowledge file${p.file_count === 1 ? "" : "s"}</span><span style="flex:1"></span></div>`;
+    const row = document.createElement("div");
+    row.className = "row";
+    const open = document.createElement("button");
+    open.textContent = "Open";
+    open.onclick = () => openProjectDetail(p.id);
+    row.appendChild(open);
+    item.appendChild(row);
+    list.appendChild(item);
+  }
+  loadProjects();
+}
+
+async function openProjectDetail(id) {
+  const p = await json(await api("/api/projects/" + id));
+  openProject = id;
+  $("proj-detail").classList.remove("hidden");
+  $("proj-edit-name").value = p.name;
+  $("proj-instructions").value = p.instructions || "";
+  $("proj-file-out").textContent = "";
+  $("proj-paste-box").classList.add("hidden");
+  renderProjectFiles(p.files || []);
+  $("proj-detail").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function renderProjectFiles(files) {
+  const ul = $("proj-files");
+  ul.innerHTML = files.length ? "" : '<li class="muted small">No knowledge files yet — upload docs/notes or paste text.</li>';
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="kf-name">📄 ${esc(f.name)}</span><span class="muted small">${fmtSize(f.size || 0)}</span>`;
+    const view = document.createElement("button");
+    view.textContent = "View";
+    view.className = "ghost";
+    view.onclick = async () => {
+      const existing = li.querySelector("pre");
+      if (existing) { existing.remove(); return; }
+      const full = await json(await api(`/api/projects/${openProject}/files/${f.id}`));
+      const pre = document.createElement("pre");
+      pre.className = "kf-preview";
+      pre.textContent = full.content;
+      li.appendChild(pre);
+    };
+    const del = document.createElement("button");
+    del.textContent = "✕";
+    del.className = "ghost danger-text";
+    del.title = "Remove";
+    del.onclick = async () => {
+      await api(`/api/projects/${openProject}/files/${f.id}`, { method: "DELETE" });
+      openProjectDetail(openProject);
+    };
+    li.append(view, del);
+    ul.appendChild(li);
+  }
+}
+
+$("proj-create-btn").onclick = async () => {
+  const name = $("proj-name").value.trim();
+  if (!name) return;
+  const r = await api("/api/projects", { method: "POST", body: { name } });
+  if (!r.ok) return;
+  $("proj-name").value = "";
+  await loadProjectsTab();
+  const p = await r.json().catch(() => ({}));
+  if (p.id) openProjectDetail(p.id);
+};
+
+$("proj-save-btn").onclick = async () => {
+  if (!openProject) return;
+  await api("/api/projects/" + openProject, {
+    method: "PUT",
+    body: { name: $("proj-edit-name").value.trim(), instructions: $("proj-instructions").value },
+  });
+  $("proj-file-out").textContent = "saved ✓";
+  loadProjectsTab();
+};
+
+$("proj-delete-btn").onclick = async () => {
+  if (!openProject || !confirm("Delete this project and its knowledge files? Chats keep their history.")) return;
+  await api("/api/projects/" + openProject, { method: "DELETE" });
+  openProject = null;
+  $("proj-detail").classList.add("hidden");
+  loadProjectsTab();
+};
+
+$("proj-close-btn").onclick = () => {
+  openProject = null;
+  $("proj-detail").classList.add("hidden");
+};
+
+$("proj-file-input").onchange = async () => {
+  if (!openProject) return;
+  const files = [...$("proj-file-input").files];
+  let ok = 0;
+  const errs = [];
+  for (const f of files) {
+    const text = await f.text();
+    const r = await api(`/api/projects/${openProject}/files`, { method: "POST", body: { name: f.name, content: text } });
+    if (r.ok) ok++;
+    else {
+      const j = await r.json().catch(() => ({}));
+      errs.push(`${f.name}: ${j.detail || "failed"}`);
+    }
+  }
+  $("proj-file-input").value = "";
+  $("proj-file-out").textContent = `added ${ok}/${files.length}` + (errs.length ? " — " + errs.join("; ") : "");
+  openProjectDetail(openProject);
+};
+
+$("proj-paste-btn").onclick = () => $("proj-paste-box").classList.toggle("hidden");
+$("proj-paste-save").onclick = async () => {
+  if (!openProject) return;
+  const name = $("proj-paste-name").value.trim();
+  const content = $("proj-paste-content").value;
+  if (!name || !content.trim()) { $("proj-file-out").textContent = "name and content required"; return; }
+  const r = await api(`/api/projects/${openProject}/files`, { method: "POST", body: { name, content } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("proj-file-out").textContent = j.detail || "failed"; return; }
+  $("proj-paste-name").value = "";
+  $("proj-paste-content").value = "";
+  $("proj-paste-box").classList.add("hidden");
+  openProjectDetail(openProject);
+};
+
+/* ---------------- appearance / themes ---------------- */
+
+const THEMES = {
+  dark: {
+    label: "Default Dark",
+    vars: {
+      "--bg": "#0d1117", "--bg2": "#161b22", "--bg3": "#1c2333", "--border": "#262f40",
+      "--text": "#e6edf4", "--muted": "#8b96a8", "--accent": "#4f8cff", "--accent2": "#22c55e", "--accent3": "#a78bfa",
+      "--glow-a": "rgba(79,140,255,.18)", "--glow-b": "rgba(167,139,250,.12)",
+      "--surface-sidebar": "rgba(22,27,34,.7)", "--surface-topbar": "rgba(22,27,34,.5)", "--surface-card": "rgba(22,27,34,.9)",
+      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.03)", "--code-bg": "rgba(0,0,0,.25)",
+    },
+  },
+  midnight: {
+    label: "Midnight",
+    vars: {
+      "--bg": "#05060f", "--bg2": "#0b0e1d", "--bg3": "#131735", "--border": "#232a52",
+      "--text": "#e8eaff", "--muted": "#8f96c0", "--accent": "#7c5cff", "--accent2": "#34d399", "--accent3": "#38bdf8",
+      "--glow-a": "rgba(124,92,255,.2)", "--glow-b": "rgba(56,189,248,.12)",
+      "--surface-sidebar": "rgba(11,14,29,.75)", "--surface-topbar": "rgba(11,14,29,.55)", "--surface-card": "rgba(11,14,29,.92)",
+      "--overlay": "rgba(0,0,0,.65)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.35)",
+    },
+  },
+  light: {
+    label: "Light",
+    vars: {
+      "--bg": "#f5f7fb", "--bg2": "#ffffff", "--bg3": "#eef1f7", "--border": "#d8dee9",
+      "--text": "#1a2233", "--muted": "#5b6577", "--accent": "#2563eb", "--accent2": "#16a34a", "--accent3": "#7c3aed",
+      "--glow-a": "rgba(37,99,235,.1)", "--glow-b": "rgba(124,58,237,.08)",
+      "--surface-sidebar": "rgba(255,255,255,.8)", "--surface-topbar": "rgba(255,255,255,.65)", "--surface-card": "rgba(255,255,255,.95)",
+      "--overlay": "rgba(15,23,42,.35)", "--row-tint": "rgba(15,23,42,.04)", "--code-bg": "rgba(15,23,42,.06)",
+    },
+  },
+  ocean: {
+    label: "Ocean",
+    vars: {
+      "--bg": "#04121d", "--bg2": "#082032", "--bg3": "#0d2c42", "--border": "#16405c",
+      "--text": "#e2f3ff", "--muted": "#7fa8bf", "--accent": "#06b6d4", "--accent2": "#34d399", "--accent3": "#60a5fa",
+      "--glow-a": "rgba(6,182,212,.16)", "--glow-b": "rgba(96,165,250,.12)",
+      "--surface-sidebar": "rgba(8,32,50,.75)", "--surface-topbar": "rgba(8,32,50,.55)", "--surface-card": "rgba(8,32,50,.92)",
+      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+    },
+  },
+  forest: {
+    label: "Forest",
+    vars: {
+      "--bg": "#07130c", "--bg2": "#0d1f14", "--bg3": "#143020", "--border": "#1e4530",
+      "--text": "#e7f5ec", "--muted": "#86a896", "--accent": "#22c55e", "--accent2": "#a3e635", "--accent3": "#fbbf24",
+      "--glow-a": "rgba(34,197,94,.14)", "--glow-b": "rgba(163,230,53,.1)",
+      "--surface-sidebar": "rgba(13,31,20,.75)", "--surface-topbar": "rgba(13,31,20,.55)", "--surface-card": "rgba(13,31,20,.92)",
+      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+    },
+  },
+  sunset: {
+    label: "Sunset",
+    vars: {
+      "--bg": "#170d12", "--bg2": "#22131c", "--bg3": "#301b28", "--border": "#47263a",
+      "--text": "#fdeef4", "--muted": "#b58a9c", "--accent": "#fb7185", "--accent2": "#fbbf24", "--accent3": "#f472b6",
+      "--glow-a": "rgba(251,113,133,.16)", "--glow-b": "rgba(244,114,182,.12)",
+      "--surface-sidebar": "rgba(34,19,28,.75)", "--surface-topbar": "rgba(34,19,28,.55)", "--surface-card": "rgba(34,19,28,.92)",
+      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+    },
+  },
+};
+
+function applyTheme() {
+  const name = localStorage.getItem("theme") || "dark";
+  const t = THEMES[name] || THEMES.dark;
+  const root = document.documentElement;
+  root.dataset.theme = name;
+  const vars = Object.assign({}, t.vars);
+  const accent = localStorage.getItem("accent");
+  if (accent) vars["--accent"] = accent;
+  vars["--grad"] = `linear-gradient(135deg, ${vars["--accent"]} 0%, ${vars["--accent3"]} 50%, #ec4899 100%)`;
+  for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
+}
+
+function renderAppearance() {
+  const grid = $("theme-grid");
+  grid.innerHTML = "";
+  const current = localStorage.getItem("theme") || "dark";
+  for (const [name, t] of Object.entries(THEMES)) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "theme-card" + (name === current ? " active" : "");
+    card.innerHTML =
+      `<span class="theme-swatch" style="background:${t.vars["--bg"]};border-color:${t.vars["--border"]}">` +
+      `<span style="background:${t.vars["--bg2"]}"></span>` +
+      `<span style="background:${t.vars["--accent"]}"></span>` +
+      `<span style="background:${t.vars["--accent3"]}"></span></span>` +
+      `<span class="theme-name">${esc(t.label)}</span>`;
+    card.onclick = () => {
+      localStorage.setItem("theme", name);
+      applyTheme();
+      renderAppearance();
+    };
+    grid.appendChild(card);
+  }
+  const t = THEMES[current] || THEMES.dark;
+  $("accent-picker").value = localStorage.getItem("accent") || t.vars["--accent"];
+}
+
+$("accent-picker").oninput = (e) => {
+  localStorage.setItem("accent", e.target.value);
+  applyTheme();
+};
+$("accent-reset").onclick = () => {
+  localStorage.removeItem("accent");
+  applyTheme();
+  renderAppearance();
+};
+
 /* ---------------- boot ---------------- */
 
 (async function init() {
   document.title = "JARVIS";
+  applyTheme();
   const saved = localStorage.getItem("session");
   await boot();
   if (state.token) {
     if (saved && state.sessions.some((s) => s.id === saved)) await selectSession(saved);
     else await newSession();
+    setInterval(() => { if (!document.hidden) loadJobs(); }, 5000);
   }
 })();

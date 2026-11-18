@@ -19,17 +19,29 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import database as db
-from .agent import run_agent
+from . import jobs as jobs_mod
+from . import projects as projects_mod
 from .config import settings
 from .llm import LLMError, detect_free_providers, from_env_provider, probe
+from .mcp import manager as mcp_manager, presets as mcp_presets
 from .presets import preset_hint
-from .skills import list_skills, load_skill
+from .skills import (
+    delete_skill,
+    get_skill_content,
+    list_skills,
+    load_skill,
+    save_skill,
+    slugify,
+    valid_id,
+)
 
 WEBUI_DIR = Path(__file__).resolve().parent.parent / "webui"
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    db.init_db()
+    jobs_mod.manager.init()
     token = db.get_setting("telegram_token")
     enabled = db.get_setting("telegram_enabled") == "1"
     if token and enabled:
@@ -42,6 +54,8 @@ async def lifespan(_app: FastAPI):
         except Exception as e:  # noqa: BLE001
             print(f"[telegram] failed to start: {e}")
     yield
+    await jobs_mod.manager.shutdown()
+    await mcp_manager.shutdown()
 
 
 app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -224,10 +238,24 @@ def sessions() -> list[dict[str, Any]]:
 
 
 @app.post("/api/sessions", dependencies=[Depends(require_any)])
-def create_session() -> dict[str, Any]:
+def create_session(body: dict[str, Any] | None = None) -> dict[str, Any]:
     sid = uuid.uuid4().hex
-    db.create_session(sid, "New chat")
+    project_id = str((body or {}).get("project_id") or "").strip() or None
+    if project_id and not db.get_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    db.create_session(sid, "New chat", project_id)
     return db.get_session(sid) or {}
+
+
+@app.post("/api/sessions/{session_id}/project", dependencies=[Depends(require_any)])
+def set_session_project(session_id: str, body: dict[str, Any]) -> dict[str, str]:
+    if not db.get_session(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    project_id = str(body.get("project_id") or "").strip() or None
+    if project_id and not db.get_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    db.set_session_project(session_id, project_id)
+    return {"ok": "saved"}
 
 
 @app.get("/api/sessions/{session_id}/messages", dependencies=[Depends(require_any)])
@@ -332,8 +360,11 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     message = str(body.get("message") or "").strip()
     if not session_id or not message:
         raise HTTPException(status_code=400, detail="session_id and message required")
-    if not db.get_session(session_id):
+    session = db.get_session(session_id)
+    if not session:
         raise HTTPException(status_code=404, detail="session not found")
+    if jobs_mod.manager.running_for_session(session_id):
+        return JSONResponse(status_code=409, content={"detail": "a task is already running in this chat — resume or stop it first"})
 
     try:
         provider = _resolve_provider(body.get("provider_id"))
@@ -354,17 +385,56 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
                    + "\n".join(f"- {a}" for a in attach)
                    + "\n\n---\n\nTask:\n" + message)
 
+    effective = message
+    if skill_body:
+        effective = f"{skill_body}\n\n---\n\nTask:\n{message}"
+    extra_system = projects_mod.build_context(session.get("project_id")) or None
+
+    job = jobs_mod.manager.start(session_id, provider, model, effective, extra_system)
+
     async def stream():
         try:
-            effective = message
-            if skill_body:
-                effective = f"{skill_body}\n\n---\n\nTask:\n{message}"
-            async for ev in run_agent(provider, model, session_id, effective):
+            async for ev in jobs_mod.manager.follow(job):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         except Exception as e:  # noqa: BLE001
             yield f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+# --------------------------------------------------------------------------
+# background jobs: push / resume / stop
+# --------------------------------------------------------------------------
+
+@app.get("/api/jobs", dependencies=[Depends(require_any)])
+def list_jobs() -> list[dict[str, Any]]:
+    rows = db.list_jobs()
+    for r in rows:
+        live = jobs_mod.manager.get(r["id"])
+        if live:
+            r["status"] = live.status
+    return rows
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def job_stream(job_id: str, after: int = 0, authorization: str | None = Header(default=None)):
+    require_any(authorization)
+    if not db.get_job(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+
+    async def stream():
+        async for ev in jobs_mod.manager.replay(job_id, max(0, after)):
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.post("/api/jobs/{job_id}/stop", dependencies=[Depends(require_any)])
+async def job_stop(job_id: str) -> dict[str, Any]:
+    if not db.get_job(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+    ok = await jobs_mod.manager.stop(job_id)
+    return {"ok": ok}
 
 
 @app.get("/api/models", dependencies=[Depends(require_any)])
@@ -376,6 +446,199 @@ def models() -> dict[str, Any]:
 @app.get("/api/skills", dependencies=[Depends(require_any)])
 def skills() -> list[dict[str, Any]]:
     return list_skills()
+
+
+@app.get("/api/skills/{skill_id}", dependencies=[Depends(require_any)])
+def skill_content(skill_id: str) -> dict[str, Any]:
+    content = get_skill_content(skill_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    return {"id": skill_id, "content": content}
+
+
+@app.post("/api/skills", dependencies=[Depends(require_web)])
+def create_skill(body: dict[str, Any]) -> dict[str, str]:
+    content = str(body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content required")
+    sid = str(body.get("id") or "").strip().lower() or slugify(str(body.get("title") or ""))
+    if not valid_id(sid):
+        raise HTTPException(status_code=400, detail="id must be lowercase letters, digits and dashes")
+    if get_skill_content(sid) is not None:
+        raise HTTPException(status_code=409, detail="a skill with that id already exists")
+    save_skill(sid, content)
+    return {"id": sid}
+
+
+@app.put("/api/skills/{skill_id}", dependencies=[Depends(require_web)])
+def update_skill(skill_id: str, body: dict[str, Any]) -> dict[str, str]:
+    content = str(body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content required")
+    if get_skill_content(skill_id) is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    save_skill(skill_id, content)
+    return {"ok": "saved"}
+
+
+@app.delete("/api/skills/{skill_id}", dependencies=[Depends(require_web)])
+def remove_skill(skill_id: str) -> dict[str, str]:
+    if not delete_skill(skill_id):
+        raise HTTPException(status_code=404, detail="skill not found")
+    return {"ok": "deleted"}
+
+
+# --------------------------------------------------------------------------
+# MCP servers (custom + ready-made npx presets)
+# --------------------------------------------------------------------------
+
+def _mcp_fields(body: dict[str, Any]) -> tuple[str, str, list[str], dict[str, str]]:
+    name = str(body.get("name") or "").strip()[:60]
+    command = str(body.get("command") or "").strip()
+    args = [str(a) for a in (body.get("args") or []) if str(a).strip()]
+    env_raw = body.get("env") or {}
+    if not isinstance(env_raw, dict):
+        raise HTTPException(status_code=400, detail="env must be an object of KEY: value")
+    env = {str(k): str(v) for k, v in env_raw.items()}
+    if not name or not command:
+        raise HTTPException(status_code=400, detail="name and command required")
+    return name, command, args, env
+
+
+@app.get("/api/mcp", dependencies=[Depends(require_any)])
+def mcp_list() -> dict[str, Any]:
+    return {"servers": db.list_mcp_servers(), "presets": mcp_presets()}
+
+
+@app.post("/api/mcp", dependencies=[Depends(require_web)])
+def mcp_add(body: dict[str, Any]) -> dict[str, Any]:
+    name, command, args, env = _mcp_fields(body)
+    sid = db.add_mcp_server(name, command, args, env)
+    return {"id": sid}
+
+
+@app.put("/api/mcp/{server_id}", dependencies=[Depends(require_web)])
+async def mcp_update(server_id: int, body: dict[str, Any]) -> dict[str, str]:
+    cur = db.get_mcp_server(server_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    name = str(body.get("name") or cur["name"]).strip()[:60]
+    command = str(body.get("command") or cur["command"]).strip()
+    args = [str(a) for a in body["args"]] if "args" in body else cur["args"]
+    env = None
+    if "env" in body and isinstance(body["env"], dict):
+        env = {str(k): str(v) for k, v in body["env"].items()}
+    enabled = bool(body.get("enabled", cur["enabled"]))
+    db.update_mcp_server(server_id, name, command, args, env, enabled)
+    await mcp_manager.invalidate(server_id)
+    return {"ok": "saved"}
+
+
+@app.delete("/api/mcp/{server_id}", dependencies=[Depends(require_web)])
+async def mcp_delete(server_id: int) -> dict[str, str]:
+    await mcp_manager.invalidate(server_id)
+    if not db.delete_mcp_server(server_id):
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    return {"ok": "deleted"}
+
+
+@app.post("/api/mcp/test", dependencies=[Depends(require_web)])
+async def mcp_test(body: dict[str, Any]) -> dict[str, Any]:
+    name, command, args, env = _mcp_fields(body)
+    try:
+        tools = await mcp_manager.test(command, args, env)
+        return {"ok": True, "tools": tools}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+@app.post("/api/mcp/{server_id}/test", dependencies=[Depends(require_web)])
+async def mcp_test_saved(server_id: int) -> dict[str, Any]:
+    cur = db.get_mcp_server(server_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    try:
+        tools = await mcp_manager.test(cur["command"], cur["args"], cur["env"])
+        return {"ok": True, "tools": tools}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+# --------------------------------------------------------------------------
+# projects + knowledge context
+# --------------------------------------------------------------------------
+
+@app.get("/api/projects", dependencies=[Depends(require_any)])
+def projects_list() -> list[dict[str, Any]]:
+    return db.list_projects()
+
+
+@app.post("/api/projects", dependencies=[Depends(require_any)])
+def projects_create(body: dict[str, Any]) -> dict[str, Any]:
+    name = str(body.get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    pid = projects_mod.new_id()
+    db.create_project(pid, name, str(body.get("instructions") or ""))
+    return db.get_project(pid) or {}
+
+
+@app.get("/api/projects/{project_id}", dependencies=[Depends(require_any)])
+def projects_get(project_id: str) -> dict[str, Any]:
+    p = db.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="project not found")
+    p["files"] = db.list_project_files(project_id)
+    return p
+
+
+@app.put("/api/projects/{project_id}", dependencies=[Depends(require_any)])
+def projects_update(project_id: str, body: dict[str, Any]) -> dict[str, str]:
+    p = db.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="project not found")
+    name = str(body.get("name") or p["name"]).strip()[:80]
+    instructions = str(body.get("instructions") if "instructions" in body else p["instructions"] or "")
+    db.update_project(project_id, name, instructions)
+    return {"ok": "saved"}
+
+
+@app.delete("/api/projects/{project_id}", dependencies=[Depends(require_any)])
+def projects_delete(project_id: str) -> dict[str, str]:
+    if not db.delete_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    return {"ok": "deleted"}
+
+
+@app.post("/api/projects/{project_id}/files", dependencies=[Depends(require_any)])
+def projects_add_file(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    if not db.get_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    name = str(body.get("name") or "").strip()[:120]
+    content = str(body.get("content") or "")
+    if not name or not content.strip():
+        raise HTTPException(status_code=400, detail="name and content required")
+    if len(content) > 200_000:
+        raise HTTPException(status_code=400, detail="knowledge file too large (max 200 KB of text)")
+    fid = db.add_project_file(project_id, name, content)
+    return {"id": fid}
+
+
+@app.get("/api/projects/{project_id}/files/{file_id}", dependencies=[Depends(require_any)])
+def projects_file_content(project_id: str, file_id: int) -> dict[str, Any]:
+    f = db.get_project_file(file_id)
+    if not f or f["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="file not found")
+    return f
+
+
+@app.delete("/api/projects/{project_id}/files/{file_id}", dependencies=[Depends(require_any)])
+def projects_delete_file(project_id: str, file_id: int) -> dict[str, str]:
+    f = db.get_project_file(file_id)
+    if not f or f["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="file not found")
+    db.delete_project_file(file_id)
+    return {"ok": "deleted"}
 
 
 # --------------------------------------------------------------------------

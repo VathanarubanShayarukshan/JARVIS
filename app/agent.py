@@ -90,12 +90,14 @@ async def run_agent(
     model: str,
     session_id: str,
     user_text: str,
+    extra_system: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     append_message(session_id, "user", user_text)
 
     history = list_messages(session_id, limit=settings.max_messages)
+    system_prompt = DEFAULT_SYSTEM_PROMPT + (extra_system or "")
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
+        {"role": "system", "content": system_prompt}
     ] + [
         {"role": m["role"], "content": m["content"] or ""}
         for m in history
@@ -107,8 +109,19 @@ async def run_agent(
     tool_configs = registry.tool_configs()
     output_files: list[str] = []
 
+    from .mcp import manager as mcp_manager
+
+    mcp_configs, mcp_warnings = await mcp_manager.tool_configs()
+    tool_configs = tool_configs + mcp_configs
+    for w in mcp_warnings:
+        yield {"type": "status", "message": w}
+
     try:
-        for _ in range(min(settings.max_tool_iterations, 48)):
+        iterations = 0
+        while True:
+            if settings.max_tool_iterations > 0 and iterations >= settings.max_tool_iterations:
+                break
+            iterations += 1
             yield {"type": "status", "message": "Thinking..."}
 
             tool_calls: list[dict[str, Any]] = []
@@ -186,7 +199,10 @@ async def run_agent(
                 yield {"type": "tool_call", "id": call_id, "name": tc["name"], "arguments": args}
                 if tc["name"] == "write_file" and args.get("path"):
                     output_files.append(str(args["path"]))
-                result = registry.call(tc["name"], args)
+                if tc["name"].startswith("mcp__"):
+                    result = await mcp_manager.call_tool(tc["name"], args)
+                else:
+                    result = registry.call(tc["name"], args)
                 if len(result) > MAX_TOOL_RESULT_CHARS:
                     result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[truncated]"
                 yield {"type": "tool_result", "id": call_id, "name": tc["name"], "result": result}

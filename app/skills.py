@@ -46,3 +46,36 @@ def load_skill(skill_id: str) -> str | None:
     if not f.is_file():
         return None
     return _read(f)[2]
+
+
+def valid_id(skill_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,60}", skill_id or ""))
+
+
+def slugify(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:60]
+    return s or "skill"
+
+
+def get_skill_content(skill_id: str) -> str | None:
+    if not valid_id(skill_id):
+        return None
+    f = SKILLS_DIR / f"{skill_id}.md"
+    if not f.is_file():
+        return None
+    return f.read_text(encoding="utf-8", errors="replace")
+
+
+def save_skill(skill_id: str, content: str) -> None:
+    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    (SKILLS_DIR / f"{skill_id}.md").write_text(content, encoding="utf-8")
+
+
+def delete_skill(skill_id: str) -> bool:
+    if not valid_id(skill_id):
+        return False
+    f = SKILLS_DIR / f"{skill_id}.md"
+    if not f.is_file():
+        return False
+    f.unlink()
+    return True

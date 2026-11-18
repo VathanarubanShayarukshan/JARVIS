@@ -53,8 +53,47 @@ def init_db() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+            CREATE TABLE IF NOT EXISTS jobs(
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                status TEXT,
+                created_at REAL,
+                updated_at REAL
+            );
+            CREATE TABLE IF NOT EXISTS job_events(
+                job_id TEXT,
+                idx INTEGER,
+                event TEXT,
+                PRIMARY KEY(job_id, idx)
+            );
+            CREATE TABLE IF NOT EXISTS mcp_servers(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                command TEXT,
+                args TEXT,
+                env TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at REAL
+            );
+            CREATE TABLE IF NOT EXISTS projects(
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                instructions TEXT,
+                created_at REAL,
+                updated_at REAL
+            );
+            CREATE TABLE IF NOT EXISTS project_files(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                name TEXT,
+                content TEXT,
+                created_at REAL
+            );
             """
         )
+        cols = [r["name"] for r in db.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "project_id" not in cols:
+            db.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
     _seed_presets()
 
 
@@ -75,20 +114,27 @@ def get_session(session_id: str) -> dict[str, Any] | None:
         return _row_to_dict(db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone())
 
 
-def create_session(session_id: str, title: str) -> None:
+def create_session(session_id: str, title: str, project_id: str | None = None) -> None:
     import time
     with _lock, _conn() as db:
         db.execute(
-            "INSERT INTO sessions(id,title,created_at,updated_at) VALUES(?,?,?,?)",
-            (session_id, title, time.time(), time.time()),
+            "INSERT INTO sessions(id,title,created_at,updated_at,project_id) VALUES(?,?,?,?,?)",
+            (session_id, title, time.time(), time.time(), project_id),
         )
 
 
 def delete_session(session_id: str) -> bool:
     with _lock, _conn() as db:
         db.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+        db.execute("DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE session_id=?)", (session_id,))
+        db.execute("DELETE FROM jobs WHERE session_id=?", (session_id,))
         cur = db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
         return cur.rowcount > 0
+
+
+def set_session_project(session_id: str, project_id: str | None) -> None:
+    with _lock, _conn() as db:
+        db.execute("UPDATE sessions SET project_id=? WHERE id=?", (project_id, session_id))
 
 
 def touch_session(session_id: str) -> None:
@@ -232,3 +278,199 @@ def set_setting(key: str, value: str) -> None:
             "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+
+
+# ---------------- jobs (background agent runs) ----------------
+
+def create_job(job_id: str, session_id: str) -> None:
+    import time
+    with _lock, _conn() as db:
+        db.execute(
+            "INSERT INTO jobs(id,session_id,status,created_at,updated_at) VALUES(?,?,?,?,?)",
+            (job_id, session_id, "running", time.time(), time.time()),
+        )
+
+
+def set_job_status(job_id: str, status: str) -> None:
+    import time
+    with _lock, _conn() as db:
+        db.execute("UPDATE jobs SET status=?,updated_at=? WHERE id=?", (status, time.time(), job_id))
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with _lock, _conn() as db:
+        return _row_to_dict(db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
+
+
+def list_jobs(limit: int = 100) -> list[dict[str, Any]]:
+    with _lock, _conn() as db:
+        rows = db.execute(
+            "SELECT j.*, s.title AS session_title FROM jobs j"
+            " LEFT JOIN sessions s ON s.id = j.session_id"
+            " ORDER BY j.created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_job_event(job_id: str, idx: int, event: dict[str, Any]) -> None:
+    import time
+    with _lock, _conn() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO job_events(job_id,idx,event) VALUES(?,?,?)",
+            (job_id, idx, json.dumps(event, ensure_ascii=False)),
+        )
+        db.execute("UPDATE jobs SET updated_at=? WHERE id=?", (time.time(), job_id))
+
+
+def get_job_events(job_id: str, after: int = 0) -> list[dict[str, Any]]:
+    with _lock, _conn() as db:
+        rows = db.execute(
+            "SELECT event FROM job_events WHERE job_id=? AND idx>=? ORDER BY idx",
+            (job_id, after),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                out.append(json.loads(r["event"]))
+            except json.JSONDecodeError:
+                continue
+        return out
+
+
+def interrupt_stale_jobs() -> None:
+    import time
+    with _lock, _conn() as db:
+        rows = db.execute("SELECT id FROM jobs WHERE status='running'").fetchall()
+        for r in rows:
+            ev = {"type": "error", "message": "Server restarted while this task was running — it was interrupted. Send the task again to retry."}
+            n = db.execute("SELECT COALESCE(MAX(idx)+1,0) AS n FROM job_events WHERE job_id=?", (r["id"],)).fetchone()["n"]
+            db.execute("INSERT OR REPLACE INTO job_events(job_id,idx,event) VALUES(?,?,?)", (r["id"], n, json.dumps(ev)))
+            db.execute("UPDATE jobs SET status='interrupted',updated_at=? WHERE id=?", (time.time(), r["id"]))
+
+
+# ---------------- MCP servers ----------------
+
+def list_mcp_servers() -> list[dict[str, Any]]:
+    with _lock, _conn() as db:
+        rows = db.execute("SELECT * FROM mcp_servers ORDER BY id").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["args"] = json.loads(d["args"] or "[]")
+            env = json.loads(d["env"] or "{}")
+            d["env"] = {k: ("••••••" if v else "") for k, v in env.items()}
+            d["enabled"] = bool(d["enabled"])
+            out.append(d)
+        return out
+
+
+def get_mcp_server(server_id: int) -> dict[str, Any] | None:
+    with _lock, _conn() as db:
+        row = db.execute("SELECT * FROM mcp_servers WHERE id=?", (server_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["args"] = json.loads(d["args"] or "[]")
+        d["env"] = json.loads(d["env"] or "{}")
+        return d
+
+
+def add_mcp_server(name: str, command: str, args: list[str], env: dict[str, str]) -> int:
+    import time
+    with _lock, _conn() as db:
+        cur = db.execute(
+            "INSERT INTO mcp_servers(name,command,args,env,enabled,created_at) VALUES(?,?,?,?,1,?)",
+            (name, command, json.dumps(args), json.dumps(env), time.time()),
+        )
+        return cur.lastrowid
+
+
+def update_mcp_server(server_id: int, name: str, command: str, args: list[str], env: dict[str, str] | None, enabled: bool) -> None:
+    with _lock, _conn() as db:
+        if env is None:
+            db.execute(
+                "UPDATE mcp_servers SET name=?,command=?,args=?,enabled=? WHERE id=?",
+                (name, command, json.dumps(args), 1 if enabled else 0, server_id),
+            )
+        else:
+            db.execute(
+                "UPDATE mcp_servers SET name=?,command=?,args=?,env=?,enabled=? WHERE id=?",
+                (name, command, json.dumps(args), json.dumps(env), 1 if enabled else 0, server_id),
+            )
+
+
+def delete_mcp_server(server_id: int) -> bool:
+    with _lock, _conn() as db:
+        return db.execute("DELETE FROM mcp_servers WHERE id=?", (server_id,)).rowcount > 0
+
+
+# ---------------- projects + knowledge ----------------
+
+def list_projects() -> list[dict[str, Any]]:
+    with _lock, _conn() as db:
+        rows = db.execute(
+            "SELECT p.*, (SELECT COUNT(*) FROM project_files f WHERE f.project_id=p.id) AS file_count"
+            " FROM projects p ORDER BY p.updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_project(project_id: str) -> dict[str, Any] | None:
+    with _lock, _conn() as db:
+        return _row_to_dict(db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+
+
+def create_project(project_id: str, name: str, instructions: str) -> None:
+    import time
+    with _lock, _conn() as db:
+        db.execute(
+            "INSERT INTO projects(id,name,instructions,created_at,updated_at) VALUES(?,?,?,?,?)",
+            (project_id, name, instructions, time.time(), time.time()),
+        )
+
+
+def update_project(project_id: str, name: str, instructions: str) -> None:
+    import time
+    with _lock, _conn() as db:
+        db.execute(
+            "UPDATE projects SET name=?,instructions=?,updated_at=? WHERE id=?",
+            (name, instructions, time.time(), project_id),
+        )
+
+
+def delete_project(project_id: str) -> bool:
+    with _lock, _conn() as db:
+        db.execute("DELETE FROM project_files WHERE project_id=?", (project_id,))
+        db.execute("UPDATE sessions SET project_id=NULL WHERE project_id=?", (project_id,))
+        return db.execute("DELETE FROM projects WHERE id=?", (project_id,)).rowcount > 0
+
+
+def list_project_files(project_id: str) -> list[dict[str, Any]]:
+    with _lock, _conn() as db:
+        rows = db.execute(
+            "SELECT id,project_id,name,created_at,LENGTH(content) AS size FROM project_files WHERE project_id=? ORDER BY id",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_project_file(file_id: int) -> dict[str, Any] | None:
+    with _lock, _conn() as db:
+        return _row_to_dict(db.execute("SELECT * FROM project_files WHERE id=?", (file_id,)).fetchone())
+
+
+def add_project_file(project_id: str, name: str, content: str) -> int:
+    import time
+    with _lock, _conn() as db:
+        cur = db.execute(
+            "INSERT INTO project_files(project_id,name,content,created_at) VALUES(?,?,?,?)",
+            (project_id, name, content, time.time()),
+        )
+        db.execute("UPDATE projects SET updated_at=? WHERE id=?", (time.time(), project_id))
+        return cur.lastrowid
+
+
+def delete_project_file(file_id: int) -> bool:
+    with _lock, _conn() as db:
+        return db.execute("DELETE FROM project_files WHERE id=?", (file_id,)).rowcount > 0

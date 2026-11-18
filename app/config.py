@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     open_access: bool = False
 
-    max_tool_iterations: int = 12
+    max_tool_iterations: int = 0
     max_messages: int = 60
 
     provider_base_url: str = ""
