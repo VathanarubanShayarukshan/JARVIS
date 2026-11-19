@@ -1,6 +1,7 @@
-"""Custom MCP servers over stdio (npx / uvx / any command).
+"""Custom MCP servers over stdio (npx / uvx / any command) or a remote URL
+(Streamable HTTP, falling back to SSE).
 
-Enabled servers are spawned lazily on the first chat that needs them and kept
+Enabled servers are connected lazily on the first chat that needs them and kept
 alive for subsequent calls. Their tools are exposed to the model as
 `mcp__<server>__<tool>` functions alongside the built-in tools.
 """
@@ -11,6 +12,7 @@ import asyncio
 import os
 import re
 import shutil
+from contextlib import asynccontextmanager
 from typing import Any
 
 from . import database as db
@@ -42,6 +44,18 @@ def _attr(obj: Any, *names: str, default: Any = None) -> Any:
         if v is not None:
             return v
     return default
+
+
+@asynccontextmanager
+async def _http_streams(url: str, headers: dict[str, str]):
+    import httpx2
+    from mcp.client.streamable_http import streamable_http_client
+
+    async with httpx2.AsyncClient(
+        headers=headers or {}, timeout=httpx2.Timeout(30.0, read=300.0)
+    ) as client:
+        async with streamable_http_client(url, http_client=client) as (read, write):
+            yield read, write
 
 
 def presets() -> list[dict[str, Any]]:
@@ -114,40 +128,63 @@ class MCPManager:
         self._conns: dict[int, _Connection] = {}
         self._lock = asyncio.Lock()
 
-    async def _serve(self, conn: _Connection) -> None:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
+    async def _session_body(self, conn: _Connection, read: Any, write: Any) -> None:
+        from mcp import ClientSession
 
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools: list[Any] = []
+            cursor = None
+            while True:
+                if cursor:
+                    from mcp import types
+
+                    res = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                else:
+                    res = await session.list_tools()
+                tools.extend(res.tools)
+                cursor = _attr(res, "next_cursor", "nextCursor")
+                if not cursor:
+                    break
+            conn.tools = tools
+            conn.session = session
+            conn.ready.set()
+            await conn.close.wait()
+
+    async def _serve_remote(self, conn: _Connection, url: str, headers: dict[str, str]) -> None:
+        from mcp.client.sse import sse_client
+
+        try:
+            async with _http_streams(url, headers) as (read, write):
+                await self._session_body(conn, read, write)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if conn.ready.is_set():
+                raise
+            async with sse_client(url, headers=headers or None, timeout=30.0, sse_read_timeout=300.0) as (read, write):
+                await self._session_body(conn, read, write)
+
+    async def _serve(self, conn: _Connection) -> None:
         s = conn.server
+        url = (s.get("url") or "").strip()
         log_dir = settings.data_dir / "mcp-logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         errlog = open(log_dir / f"{_slug(s['name'])}.log", "a", encoding="utf-8", errors="replace")
-        params = StdioServerParameters(
-            command=_resolve_command(s["command"]),
-            args=s.get("args") or [],
-            env={**os.environ, **(s.get("env") or {})},
-        )
         try:
-            async with stdio_client(params, errlog=errlog) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    tools: list[Any] = []
-                    cursor = None
-                    while True:
-                        if cursor:
-                            from mcp import types
+            if url:
+                await self._serve_remote(conn, url, s.get("env") or {})
+            else:
+                from mcp import StdioServerParameters
+                from mcp.client.stdio import stdio_client
 
-                            res = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
-                        else:
-                            res = await session.list_tools()
-                        tools.extend(res.tools)
-                        cursor = _attr(res, "next_cursor", "nextCursor")
-                        if not cursor:
-                            break
-                    conn.tools = tools
-                    conn.session = session
-                    conn.ready.set()
-                    await conn.close.wait()
+                params = StdioServerParameters(
+                    command=_resolve_command(s["command"]),
+                    args=s.get("args") or [],
+                    env={**os.environ, **(s.get("env") or {})},
+                )
+                async with stdio_client(params, errlog=errlog) as (read, write):
+                    await self._session_body(conn, read, write)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -173,7 +210,12 @@ class MCPManager:
         try:
             await asyncio.wait_for(conn.ready.wait(), CONNECT_TIMEOUT)
         except asyncio.TimeoutError:
-            conn.error = f"timed out after {int(CONNECT_TIMEOUT)}s (is '{server['command']}' installed? first npx run downloads the package)"
+            hint = (
+                "check the URL and headers"
+                if (server.get("url") or "").strip()
+                else f"is '{server['command']}' installed? first npx run downloads the package"
+            )
+            conn.error = f"timed out after {int(CONNECT_TIMEOUT)}s ({hint})"
             await self._drop(conn)
         return conn
 
@@ -259,23 +301,37 @@ class MCPManager:
                 return f"Error: MCP call failed: {type(e).__name__}: {e}"
         return "Error: MCP call failed"
 
-    async def test(self, command: str, args: list[str], env: dict[str, str]) -> list[dict[str, Any]]:
+    async def test(self, command: str, args: list[str], env: dict[str, str], url: str = "") -> list[dict[str, Any]]:
         from mcp import ClientSession, StdioServerParameters
+        from mcp.client.sse import sse_client
         from mcp.client.stdio import stdio_client
 
-        params = StdioServerParameters(
-            command=_resolve_command(command), args=args, env={**os.environ, **(env or {})}
-        )
+        url = (url or "").strip()
+
+        async def _probe_session(read: Any, write: Any) -> list[dict[str, Any]]:
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                res = await session.list_tools()
+                return [
+                    {"name": t.name, "description": (_attr(t, "description") or "")[:200]}
+                    for t in res.tools
+                ]
 
         async def _probe() -> list[dict[str, Any]]:
+            if url:
+                try:
+                    async with _http_streams(url, env or {}) as (read, write):
+                        return await _probe_session(read, write)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    async with sse_client(url, headers=env or None, timeout=30.0) as (read, write):
+                        return await _probe_session(read, write)
+            params = StdioServerParameters(
+                command=_resolve_command(command), args=args, env={**os.environ, **(env or {})}
+            )
             async with stdio_client(params, errlog=open(os.devnull, "w")) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    res = await session.list_tools()
-                    return [
-                        {"name": t.name, "description": (_attr(t, "description") or "")[:200]}
-                        for t in res.tools
-                    ]
+                return await _probe_session(read, write)
 
         return await asyncio.wait_for(_probe(), CONNECT_TIMEOUT)
 

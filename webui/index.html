@@ -107,77 +107,114 @@
     </div>
   </main>
 
-  <!-- ---------- settings / admin dialog ---------- -->
-  <div id="settings-modal" class="modal hidden">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2>Settings</h2>
-        <button class="icon-btn" id="settings-close">✕</button>
+  <!-- ---------- settings ---------- -->
+  <div id="settings-modal" class="settings-screen hidden">
+    <aside class="set-sidebar">
+      <button class="set-back" id="settings-close">← Back to app</button>
+      <div class="set-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="settings-search" placeholder="Search settings…" autocomplete="off">
       </div>
-      <div class="modal-tabs">
-        <button class="tab active" data-tab="models">Models</button>
-        <button class="tab" data-tab="mcp">MCP</button>
-        <button class="tab" data-tab="skills">Skills</button>
-        <button class="tab" data-tab="projects">Projects</button>
-        <button class="tab" data-tab="appearance">Appearance</button>
-        <button class="tab" data-tab="tokens">API tokens</button>
-        <button class="tab" data-tab="account">Account</button>
-        <button class="tab" data-tab="files">Files</button>
-        <button class="tab" data-tab="bots">Bots</button>
-      </div>
+      <nav class="set-nav" id="settings-nav">
+        <div class="set-group">General</div>
+        <button class="set-item active" data-tab="models"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Models</button>
+        <button class="set-item" data-tab="appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.5"/><circle cx="7" cy="16" r="2.5"/></svg>Appearance</button>
+        <button class="set-item" data-tab="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/></svg>Account</button>
+        <div class="set-group">Agent</div>
+        <button class="set-item" data-tab="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 1 2-2h14"/><path d="m12 7 1.2 2.4L16 10l-2.8.6L12 13l-1.2-2.4L8 10l2.8-.6z"/></svg>Skills</button>
+        <button class="set-item" data-tab="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5"/><path d="m3 13 9 5 9-5"/></svg>Projects</button>
+        <button class="set-item" data-tab="files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Files</button>
+        <div class="set-group">Integrations</div>
+        <button class="set-item" data-tab="mcp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>MCP servers</button>
+        <button class="set-item" data-tab="bots"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="9" width="14" height="10" rx="3"/><path d="M12 9V5M12 5a1.5 1.5 0 1 0-.01 0"/><path d="M9.5 13.5h.01M14.5 13.5h.01"/></svg>Bots</button>
+        <button class="set-item" data-tab="tokens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 4l3 3M13 7l2 2"/></svg>API tokens</button>
+        <p class="set-noresults muted small hidden" id="set-noresults">No settings match your search.</p>
+      </nav>
+      <div class="set-foot muted small">JARVIS · self-hosted agent</div>
+    </aside>
+
+    <main class="set-main">
+      <div class="set-content">
 
       <div class="tab-panel" id="tab-models">
-        <p class="muted small">End users never need an API key. Add a <b>free</b> key here once: Google Gemini, Groq or OpenRouter (all free, no card required). A local LLM found on the server also works automatically.</p>
-        <div id="provider-list"></div>
-        <details class="add-provider">
-          <summary>+ Custom provider (any OpenAI-compatible endpoint)</summary>
-          <div class="row">
-            <input id="p-name" placeholder="name">
-            <input id="p-url" placeholder="https://api.example.com/v1">
-            <input id="p-key" type="password" placeholder="API key (free tier OK)">
-            <input id="p-models" placeholder="model-a,model-b (optional)">
-          </div>
-          <div class="row">
-            <button class="primary" id="probe-btn">Check connectivity</button>
-            <button id="add-provider-btn">Add provider</button>
-          </div>
-          <p id="probe-out" class="muted small"></p>
-        </details>
+        <header class="set-head">
+          <h2>Models</h2>
+          <p class="muted">End users never need an API key. Add a <b>free</b> key here once: Google Gemini, Groq or OpenRouter (all free, no card required). A local LLM found on the server also works automatically.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">Providers</h3>
+          <div id="provider-list"></div>
+        </section>
+        <section class="set-card">
+          <details class="add-provider">
+            <summary>+ Custom provider (any OpenAI-compatible endpoint)</summary>
+            <div class="row">
+              <input id="p-name" placeholder="name">
+              <input id="p-url" placeholder="https://api.example.com/v1">
+              <input id="p-key" type="password" placeholder="API key (free tier OK)">
+              <input id="p-models" placeholder="model-a,model-b (optional)">
+            </div>
+            <div class="row">
+              <button class="primary" id="probe-btn">Check connectivity</button>
+              <button id="add-provider-btn">Add provider</button>
+            </div>
+            <p id="probe-out" class="muted small"></p>
+          </details>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-mcp">
-        <p class="muted small">Connect <b>MCP servers</b> to give JARVIS extra tools (GitHub, browsers, memory…). Ready-made presets install with <code>npx</code> — Node.js must be on the server. Their tools appear automatically in every chat.</p>
-        <div id="mcp-presets" class="preset-grid"></div>
-        <h3 class="section-title">Your servers</h3>
-        <div id="mcp-list"></div>
-        <details class="add-provider" id="mcp-custom">
-          <summary>+ Custom MCP server (any stdio command)</summary>
-          <div class="row">
-            <input id="mcp-name" placeholder="name (e.g. github)">
-            <input id="mcp-command" placeholder="command (npx / uvx / node / python)">
-          </div>
-          <div class="row">
-            <input id="mcp-args" placeholder="args, e.g. -y @modelcontextprotocol/server-github">
-          </div>
-          <textarea id="mcp-env" rows="3" placeholder="Environment variables, one per line: KEY=VALUE&#10;e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx"></textarea>
-          <div class="row">
-            <button id="mcp-test-btn">Test connection</button>
-            <button class="primary" id="mcp-add-btn">Add server</button>
-          </div>
-          <p id="mcp-out" class="muted small"></p>
-        </details>
+        <header class="set-head">
+          <h2>MCP servers</h2>
+          <p class="muted">Give JARVIS extra tools (GitHub, browsers, memory…). Connect a hosted server with a single <b>URL</b> (Streamable HTTP / SSE), or run ready-made presets with <code>npx</code> — Node.js must be on the server. Tools appear automatically in every chat.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">Ready-made presets</h3>
+          <div id="mcp-presets" class="preset-grid"></div>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">Your servers</h3>
+          <div id="mcp-list"></div>
+        </section>
+        <section class="set-card">
+          <details class="add-provider" id="mcp-custom">
+            <summary>+ Custom MCP server (URL or any stdio command)</summary>
+            <div class="row">
+              <input id="mcp-name" placeholder="name (e.g. github)">
+              <input id="mcp-command" placeholder="command (npx / uvx / node / python)">
+            </div>
+            <div class="row">
+              <input id="mcp-args" placeholder="args, e.g. -y @modelcontextprotocol/server-github">
+            </div>
+            <div class="row">
+              <input id="mcp-url" placeholder="or remote MCP URL — https://example.com/mcp (Streamable HTTP / SSE)">
+            </div>
+            <textarea id="mcp-env" rows="3" placeholder="Environment variables, one per line: KEY=VALUE&#10;e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx"></textarea>
+            <div class="row">
+              <button id="mcp-test-btn">Test connection</button>
+              <button class="primary" id="mcp-add-btn">Add server</button>
+            </div>
+            <p id="mcp-out" class="muted small"></p>
+          </details>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-skills">
-        <p class="muted small">Skills are markdown instruction packs. Pick one in the top bar to prepend it to your next task. Create, edit, import or delete them here — changes apply instantly, no restart.</p>
-        <div class="row">
-          <button id="skill-new-btn" class="primary">+ New skill</button>
-          <label for="skill-import" class="upload-label">Import .md files</label>
-          <input type="file" id="skill-import" class="file-input" accept=".md,.txt" multiple>
-          <span id="skill-import-out" class="muted small"></span>
-        </div>
-        <div id="skill-list"></div>
-        <div id="skill-editor" class="hidden">
+        <header class="set-head">
+          <h2>Skills</h2>
+          <p class="muted">Markdown instruction packs. Pick one in the top bar to prepend it to your next task. Changes apply instantly — no restart.</p>
+        </header>
+        <section class="set-card">
+          <div class="row">
+            <button id="skill-new-btn" class="primary">+ New skill</button>
+            <label for="skill-import" class="upload-label">Import .md files</label>
+            <input type="file" id="skill-import" class="file-input" accept=".md,.txt" multiple>
+            <span id="skill-import-out" class="muted small"></span>
+          </div>
+          <div id="skill-list"></div>
+        </section>
+        <section class="set-card hidden" id="skill-editor">
+          <h3 class="set-card-title">Edit skill</h3>
           <div class="row">
             <input id="skill-id" placeholder="skill id (auto from title if empty)">
           </div>
@@ -187,17 +224,22 @@
             <button id="skill-cancel-btn" class="ghost">Cancel</button>
             <span id="skill-out" class="muted small"></span>
           </div>
-        </div>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-projects">
-        <p class="muted small">Projects bundle <b>instructions + knowledge files</b> (notes, docs, specs). Select a project in the top bar and every chat under it gets that context automatically.</p>
-        <div class="row">
-          <input id="proj-name" placeholder="New project name (e.g. My App)">
-          <button class="primary" id="proj-create-btn">Create project</button>
-        </div>
-        <div id="proj-list"></div>
-        <div id="proj-detail" class="hidden">
+        <header class="set-head">
+          <h2>Projects</h2>
+          <p class="muted">Bundle <b>instructions + knowledge files</b> (notes, docs, specs). Select a project in the top bar and every chat under it gets that context automatically.</p>
+        </header>
+        <section class="set-card">
+          <div class="row">
+            <input id="proj-name" placeholder="New project name (e.g. My App)">
+            <button class="primary" id="proj-create-btn">Create project</button>
+          </div>
+          <div id="proj-list"></div>
+        </section>
+        <section class="set-card hidden" id="proj-detail">
           <div class="row">
             <input id="proj-edit-name" placeholder="Project name">
             <button id="proj-save-btn" class="primary">Save</button>
@@ -219,89 +261,125 @@
             <div class="row"><button id="proj-paste-save" class="primary">Add knowledge</button></div>
           </div>
           <ul id="proj-files" class="plain-list"></ul>
-        </div>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-appearance">
-        <label class="field-label">Theme</label>
-        <div id="theme-grid" class="theme-grid"></div>
-        <label class="field-label">Accent color</label>
-        <div class="row">
-          <input type="color" id="accent-picker" value="#4f8cff">
-          <button id="accent-reset" class="ghost">Reset accent</button>
-        </div>
-        <p class="muted small">Appearance is saved in this browser only.</p>
+        <header class="set-head">
+          <h2>Appearance</h2>
+          <p class="muted">Theme and accent color. Saved in this browser only.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">Theme</h3>
+          <div id="theme-grid" class="theme-grid"></div>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">Accent color</h3>
+          <div class="row">
+            <input type="color" id="accent-picker" value="#4f8cff">
+            <button id="accent-reset" class="ghost">Reset accent</button>
+          </div>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-tokens">
-        <p class="muted small">API tokens let other web apps / tools call this agent's API (<code>/api/chat</code>, sessions, files) via <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-        <div class="row">
-          <input id="token-name" placeholder="e.g. my-web-app">
-          <button id="create-token-btn">Create token</button>
-        </div>
-        <ul id="token-list"></ul>
+        <header class="set-head">
+          <h2>API tokens</h2>
+          <p class="muted">Let other web apps / tools call this agent's API (<code>/api/chat</code>, sessions, files) via <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+        </header>
+        <section class="set-card">
+          <div class="row">
+            <input id="token-name" placeholder="e.g. my-web-app">
+            <button id="create-token-btn">Create token</button>
+          </div>
+          <ul id="token-list"></ul>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-account">
-        <label>Change admin password</label>
-        <div class="row">
-          <input id="new-pass" type="password" placeholder="new password">
-          <button id="change-pass-btn">Save</button>
-        </div>
-        <p class="muted small">Workspace folder on the server: <code id="ws-path2"></code></p>
+        <header class="set-head">
+          <h2>Account</h2>
+          <p class="muted">Admin access and the server workspace.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">Change admin password</h3>
+          <div class="row">
+            <input id="new-pass" type="password" placeholder="new password">
+            <button id="change-pass-btn">Save</button>
+          </div>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">Workspace</h3>
+          <p class="muted small">Folder on the server the agent can read / write / run commands in: <code id="ws-path2"></code></p>
+        </section>
       </div>
 
       <div class="tab-panel hidden" id="tab-files">
-        <div class="file-panel">
-          <div class="file-toolbar">
-            <div class="row">
-              <label for="file-upload" class="upload-label">Upload</label>
-              <input type="file" id="file-upload" class="file-input" multiple>
-              <button id="file-upload-btn" class="primary">Upload here</button>
-              <span id="upload-out" class="muted small"></span>
-            </div>
-          </div>
-          <div class="file-body">
-            <div id="file-tree" class="file-tree"></div>
-            <div class="file-editor">
+        <header class="set-head">
+          <h2>Files</h2>
+          <p class="muted">Browse and edit the server workspace.</p>
+        </header>
+        <section class="set-card flush">
+          <div class="file-panel">
+            <div class="file-toolbar">
               <div class="row">
-                <span id="file-path" class="muted small">select a file</span>
-                <span class="flex-spacer"></span>
-                <button id="file-download" class="ghost hidden">Download</button>
-                <button id="file-save" class="primary hidden">Save file</button>
+                <label for="file-upload" class="upload-label">Upload</label>
+                <input type="file" id="file-upload" class="file-input" multiple>
+                <button id="file-upload-btn" class="primary">Upload here</button>
+                <span id="upload-out" class="muted small"></span>
               </div>
-              <textarea id="file-content" class="file-content" placeholder="Click a file in the workspace to view/edit it"></textarea>
+            </div>
+            <div class="file-body">
+              <div id="file-tree" class="file-tree"></div>
+              <div class="file-editor">
+                <div class="row">
+                  <span id="file-path" class="muted small">select a file</span>
+                  <span class="flex-spacer"></span>
+                  <button id="file-download" class="ghost hidden">Download</button>
+                  <button id="file-save" class="primary hidden">Save file</button>
+                </div>
+                <textarea id="file-content" class="file-content" placeholder="Click a file in the workspace to view/edit it"></textarea>
+              </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
-    <div class="tab-panel hidden" id="tab-bots">
-        <h3 style="margin:0 0 6px">Telegram bot (via BotFather)</h3>
-        <p class="muted small" id="tg-desc">Make a bot with <b>@BotFather</b> on Telegram: send <code>/newbot</code>, copy the token, paste it here and enable.</p>
-        <div class="row">
-          <input id="tg-token" type="password" placeholder="123456:ABC-DEF… (token from BotFather)">
-          <button id="tg-save" class="primary">Save + enable</button>
-        </div>
-        <label class="hint" style="margin:8px 0">
-          <input type="checkbox" id="tg-enabled"> bot enabled (runs on this server, polls Telegram)
-        </label>
-        <p id="tg-status" class="muted small"></p>
-        <p class="muted small">Commands in Telegram: <code>/agent &lt;task&gt;</code>, <code>/providers</code>, <code>/new</code>, <code>/stop</code>, <code>/help</code> — or just type a task. It uses the same agent/sessions as this web app.</p>
 
-        <hr>
-        <h3 style="margin:8px 0 6px">WhatsApp bot</h3>
-        <p class="muted small">Start the bridge once: <code>bash whatsapp/run.sh bridge</code> (reads <code>whatsapp/.env</code>). Then the QR appears here — scan with <b>WhatsApp → Linked devices</b>.</p>
-        <p id="wa-status" class="muted small">status: checking…</p>
-        <div id="wa-qr-box" class="qr-box hidden"><img id="wa-qr" alt="WhatsApp login QR"></div>
-        <div class="row" style="margin-top:8px">
-          <input id="wa-number" placeholder="WhatsApp number with country code, e.g. 919876543210">
-          <button id="wa-pair-btn">Get pairing code</button>
-        </div>
-        <p id="wa-pair-out" class="muted small"></p>
-        <pre id="wa-log" class="wa-log muted small">no bridge output yet</pre>
-        <p class="muted small">Modes on WhatsApp: <code>.agent</code>, <code>.run</code>, <code>.send</code>, <code>.get</code>, <code>.brows</code>, <code>.pro</code>, <code>.kill</code> — see <code>whatsapp/README.md</code>.</p>
+      <div class="tab-panel hidden" id="tab-bots">
+        <header class="set-head">
+          <h2>Bots</h2>
+          <p class="muted">Drive the same agent from Telegram and WhatsApp.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">Telegram bot (via BotFather)</h3>
+          <p class="muted small" id="tg-desc">Make a bot with <b>@BotFather</b> on Telegram: send <code>/newbot</code>, copy the token, paste it here and enable.</p>
+          <div class="row">
+            <input id="tg-token" type="password" placeholder="123456:ABC-DEF… (token from BotFather)">
+            <button id="tg-save" class="primary">Save + enable</button>
+          </div>
+          <label class="hint" style="margin:8px 0">
+            <input type="checkbox" id="tg-enabled"> bot enabled (runs on this server, polls Telegram)
+          </label>
+          <p id="tg-status" class="muted small"></p>
+          <p class="muted small">Commands in Telegram: <code>/agent &lt;task&gt;</code>, <code>/providers</code>, <code>/new</code>, <code>/stop</code>, <code>/help</code> — or just type a task. It uses the same agent/sessions as this web app.</p>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">WhatsApp bot</h3>
+          <p class="muted small">Start the bridge once: <code>bash whatsapp/run.sh bridge</code> (reads <code>whatsapp/.env</code>). Then the QR appears here — scan with <b>WhatsApp → Linked devices</b>.</p>
+          <p id="wa-status" class="muted small">status: checking…</p>
+          <div id="wa-qr-box" class="qr-box hidden"><img id="wa-qr" alt="WhatsApp login QR"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="wa-number" placeholder="WhatsApp number with country code, e.g. 919876543210">
+            <button id="wa-pair-btn">Get pairing code</button>
+          </div>
+          <p id="wa-pair-out" class="muted small"></p>
+          <pre id="wa-log" class="wa-log muted small">no bridge output yet</pre>
+          <p class="muted small">Modes on WhatsApp: <code>.agent</code>, <code>.run</code>, <code>.send</code>, <code>.get</code>, <code>.brows</code>, <code>.pro</code>, <code>.kill</code> — see <code>whatsapp/README.md</code>.</p>
+        </section>
       </div>
-    </div>
+
+      </div>
+    </main>
   </div>
 </div>
 

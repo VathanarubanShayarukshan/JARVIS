@@ -492,17 +492,20 @@ def remove_skill(skill_id: str) -> dict[str, str]:
 # MCP servers (custom + ready-made npx presets)
 # --------------------------------------------------------------------------
 
-def _mcp_fields(body: dict[str, Any]) -> tuple[str, str, list[str], dict[str, str]]:
+def _mcp_fields(body: dict[str, Any]) -> tuple[str, str, list[str], dict[str, str], str]:
     name = str(body.get("name") or "").strip()[:60]
     command = str(body.get("command") or "").strip()
+    url = str(body.get("url") or "").strip()
     args = [str(a) for a in (body.get("args") or []) if str(a).strip()]
     env_raw = body.get("env") or {}
     if not isinstance(env_raw, dict):
         raise HTTPException(status_code=400, detail="env must be an object of KEY: value")
     env = {str(k): str(v) for k, v in env_raw.items()}
-    if not name or not command:
-        raise HTTPException(status_code=400, detail="name and command required")
-    return name, command, args, env
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="url must start with http:// or https://")
+    if not name or (not command and not url):
+        raise HTTPException(status_code=400, detail="name and command (or url) required")
+    return name, command, args, env, url
 
 
 @app.get("/api/mcp", dependencies=[Depends(require_any)])
@@ -512,8 +515,8 @@ def mcp_list() -> dict[str, Any]:
 
 @app.post("/api/mcp", dependencies=[Depends(require_web)])
 def mcp_add(body: dict[str, Any]) -> dict[str, Any]:
-    name, command, args, env = _mcp_fields(body)
-    sid = db.add_mcp_server(name, command, args, env)
+    name, command, args, env, url = _mcp_fields(body)
+    sid = db.add_mcp_server(name, command, args, env, url)
     return {"id": sid}
 
 
@@ -524,12 +527,17 @@ async def mcp_update(server_id: int, body: dict[str, Any]) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="MCP server not found")
     name = str(body.get("name") or cur["name"]).strip()[:60]
     command = str(body.get("command") or cur["command"]).strip()
+    url = str(body["url"] if "url" in body else cur.get("url") or "").strip()
     args = [str(a) for a in body["args"]] if "args" in body else cur["args"]
     env = None
     if "env" in body and isinstance(body["env"], dict):
         env = {str(k): str(v) for k, v in body["env"].items()}
     enabled = bool(body.get("enabled", cur["enabled"]))
-    db.update_mcp_server(server_id, name, command, args, env, enabled)
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="url must start with http:// or https://")
+    if not command and not url:
+        raise HTTPException(status_code=400, detail="command or url required")
+    db.update_mcp_server(server_id, name, command, args, env, enabled, url)
     await mcp_manager.invalidate(server_id)
     return {"ok": "saved"}
 
@@ -544,9 +552,9 @@ async def mcp_delete(server_id: int) -> dict[str, str]:
 
 @app.post("/api/mcp/test", dependencies=[Depends(require_web)])
 async def mcp_test(body: dict[str, Any]) -> dict[str, Any]:
-    name, command, args, env = _mcp_fields(body)
+    name, command, args, env, url = _mcp_fields(body)
     try:
-        tools = await mcp_manager.test(command, args, env)
+        tools = await mcp_manager.test(command, args, env, url)
         return {"ok": True, "tools": tools}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -558,7 +566,7 @@ async def mcp_test_saved(server_id: int) -> dict[str, Any]:
     if not cur:
         raise HTTPException(status_code=404, detail="MCP server not found")
     try:
-        tools = await mcp_manager.test(cur["command"], cur["args"], cur["env"])
+        tools = await mcp_manager.test(cur["command"], cur["args"], cur["env"], cur.get("url") or "")
         return {"ok": True, "tools": tools}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}

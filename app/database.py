@@ -72,6 +72,7 @@ def init_db() -> None:
                 command TEXT,
                 args TEXT,
                 env TEXT,
+                url TEXT DEFAULT '',
                 enabled INTEGER DEFAULT 1,
                 created_at REAL
             );
@@ -94,6 +95,9 @@ def init_db() -> None:
         cols = [r["name"] for r in db.execute("PRAGMA table_info(sessions)").fetchall()]
         if "project_id" not in cols:
             db.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+        mcols = [r["name"] for r in db.execute("PRAGMA table_info(mcp_servers)").fetchall()]
+        if "url" not in mcols:
+            db.execute("ALTER TABLE mcp_servers ADD COLUMN url TEXT DEFAULT ''")
     _seed_presets()
 
 
@@ -376,27 +380,27 @@ def get_mcp_server(server_id: int) -> dict[str, Any] | None:
         return d
 
 
-def add_mcp_server(name: str, command: str, args: list[str], env: dict[str, str]) -> int:
+def add_mcp_server(name: str, command: str, args: list[str], env: dict[str, str], url: str = "") -> int:
     import time
     with _lock, _conn() as db:
         cur = db.execute(
-            "INSERT INTO mcp_servers(name,command,args,env,enabled,created_at) VALUES(?,?,?,?,1,?)",
-            (name, command, json.dumps(args), json.dumps(env), time.time()),
+            "INSERT INTO mcp_servers(name,command,args,env,url,enabled,created_at) VALUES(?,?,?,?,?,1,?)",
+            (name, command, json.dumps(args), json.dumps(env), url, time.time()),
         )
         return cur.lastrowid
 
 
-def update_mcp_server(server_id: int, name: str, command: str, args: list[str], env: dict[str, str] | None, enabled: bool) -> None:
+def update_mcp_server(server_id: int, name: str, command: str, args: list[str], env: dict[str, str] | None, enabled: bool, url: str = "") -> None:
     with _lock, _conn() as db:
         if env is None:
             db.execute(
-                "UPDATE mcp_servers SET name=?,command=?,args=?,enabled=? WHERE id=?",
-                (name, command, json.dumps(args), 1 if enabled else 0, server_id),
+                "UPDATE mcp_servers SET name=?,command=?,args=?,url=?,enabled=? WHERE id=?",
+                (name, command, json.dumps(args), url, 1 if enabled else 0, server_id),
             )
         else:
             db.execute(
-                "UPDATE mcp_servers SET name=?,command=?,args=?,env=?,enabled=? WHERE id=?",
-                (name, command, json.dumps(args), json.dumps(env), 1 if enabled else 0, server_id),
+                "UPDATE mcp_servers SET name=?,command=?,args=?,env=?,url=?,enabled=? WHERE id=?",
+                (name, command, json.dumps(args), json.dumps(env), url, 1 if enabled else 0, server_id),
             )
 
 

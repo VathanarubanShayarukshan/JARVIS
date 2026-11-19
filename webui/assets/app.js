@@ -1030,23 +1030,62 @@ const Voice = (() => {
 $("voice-btn").onclick = () => Voice.toggle();
 $("voice-lang").onchange = () => { if (Voice.on) { Voice.stop(); setTimeout(() => Voice.restart(), 250); } };
 
-/* ---------------- settings modal ---------------- */
+/* ---------------- settings page ---------------- */
 
 $("settings-btn").onclick = openSettings;
-$("settings-close").onclick = () => { stopBotPoll(); $("settings-modal").classList.add("hidden"); };
-document.querySelectorAll(".tab").forEach((t) =>
-  t.onclick = () => {
-    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.add("hidden"));
-    $("tab-" + t.dataset.tab).classList.remove("hidden");
-    if (t.dataset.tab === "files") loadFileTree();
-    if (t.dataset.tab === "bots") loadIntegrations();
-    if (t.dataset.tab === "mcp") loadMcpTab();
-    if (t.dataset.tab === "skills") loadSkillsTab();
-    if (t.dataset.tab === "projects") loadProjectsTab();
-    if (t.dataset.tab === "appearance") renderAppearance();
-  }
-);
+$("settings-close").onclick = closeSettings;
+
+function closeSettings() {
+  stopBotPoll();
+  $("settings-modal").classList.add("hidden");
+}
+
+function selectSetTab(name) {
+  document.querySelectorAll(".set-item").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.add("hidden"));
+  $("tab-" + name).classList.remove("hidden");
+  if (name === "files") loadFileTree();
+  if (name === "bots") loadIntegrations();
+  if (name === "mcp") loadMcpTab();
+  if (name === "skills") loadSkillsTab();
+  if (name === "projects") loadProjectsTab();
+  if (name === "appearance") renderAppearance();
+}
+
+document.querySelectorAll(".set-item").forEach((t) => (t.onclick = () => selectSetTab(t.dataset.tab)));
+
+$("settings-search").addEventListener("input", () => {
+  const q = $("settings-search").value.trim().toLowerCase();
+  let any = false;
+  document.querySelectorAll(".set-item").forEach((it) => {
+    const hit = !q || it.textContent.toLowerCase().includes(q);
+    it.classList.toggle("hidden", !hit);
+    if (hit) any = true;
+  });
+  document.querySelectorAll(".set-group").forEach((g) => {
+    let el = g.nextElementSibling;
+    let visible = false;
+    while (el && !el.classList.contains("set-group")) {
+      if (el.classList.contains("set-item") && !el.classList.contains("hidden")) visible = true;
+      el = el.nextElementSibling;
+    }
+    g.classList.toggle("hidden", !visible);
+  });
+  $("set-noresults").classList.toggle("hidden", any || !q);
+});
+
+$("settings-search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const first = [...document.querySelectorAll(".set-item")].find((it) => !it.classList.contains("hidden"));
+  if (!first) return;
+  selectSetTab(first.dataset.tab);
+  $("settings-search").value = "";
+  $("settings-search").dispatchEvent(new Event("input"));
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("settings-modal").classList.contains("hidden")) closeSettings();
+});
 
 /* ---------------- integrations: Telegram + WhatsApp ---------------- */
 
@@ -1145,6 +1184,8 @@ $("tg-save").onclick = async () => {
 
 async function openSettings() {
   $("settings-modal").classList.remove("hidden");
+  $("settings-search").value = "";
+  $("settings-search").dispatchEvent(new Event("input"));
   renderProviders();
   renderTokens();
   const health = await json(await fetch("/api/health"));
@@ -1413,6 +1454,7 @@ function mcpFormBody() {
     command: $("mcp-command").value.trim(),
     args: splitArgs($("mcp-args").value),
     env: parseEnvText($("mcp-env").value),
+    url: $("mcp-url").value.trim(),
   };
 }
 
@@ -1436,6 +1478,9 @@ async function loadMcpTab() {
       $("mcp-command").value = p.command;
       $("mcp-args").value = (p.args || []).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
       $("mcp-env").value = Object.entries(p.env || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+      $("mcp-url").value = "";
+      $("mcp-command").disabled = false;
+      $("mcp-args").disabled = false;
       $("mcp-out").textContent = (p.needs_env && p.needs_env.length)
         ? "Fill in " + p.needs_env.join(", ") + " above, then click Add server."
         : "Ready — click Add server.";
@@ -1449,13 +1494,14 @@ async function loadMcpTab() {
 
 function renderMcpServers(servers) {
   const list = $("mcp-list");
-  list.innerHTML = servers.length ? "" : '<p class="muted small">No MCP servers yet — add a preset above or a custom command below.</p>';
+  list.innerHTML = servers.length ? "" : '<p class="muted small">No MCP servers yet — add a preset above, or a URL / custom command below.</p>';
   for (const s of servers) {
     const item = document.createElement("div");
     item.className = "provider-item";
+    const target = s.url || (s.command + " " + (s.args || []).join(" "));
     item.innerHTML =
-      `<div class="p-head"><span class="p-name">${esc(s.name)}</span><span class="p-badge">${esc(s.command)}</span><span style="flex:1"></span></div>` +
-      `<p class="p-hint mono">${esc(s.command + " " + (s.args || []).join(" "))}</p>` +
+      `<div class="p-head"><span class="p-name">${esc(s.name)}</span><span class="p-badge">${esc(s.url ? "URL" : s.command)}</span><span style="flex:1"></span></div>` +
+      `<p class="p-hint mono">${esc(target)}</p>` +
       `<div class="row mcp-actions"></div><p class="muted small mcp-out"></p>`;
     const actions = item.querySelector(".mcp-actions");
     const enable = document.createElement("label");
@@ -1468,7 +1514,7 @@ function renderMcpServers(servers) {
     test.textContent = "Test";
     test.onclick = async () => {
       const out = item.querySelector(".mcp-out");
-      out.textContent = "testing… (the first npx run downloads the package, give it a minute)";
+      out.textContent = s.url ? "testing…" : "testing… (the first npx run downloads the package, give it a minute)";
       const r = await api(`/api/mcp/${s.id}/test`, { method: "POST" });
       const j = await r.json().catch(() => ({}));
       out.textContent = j.ok
@@ -1487,10 +1533,19 @@ function renderMcpServers(servers) {
   }
 }
 
+$("mcp-url").addEventListener("input", () => {
+  const remote = !!$("mcp-url").value.trim();
+  $("mcp-command").disabled = remote;
+  $("mcp-args").disabled = remote;
+  $("mcp-env").placeholder = remote
+    ? "HTTP headers, one per line: KEY=VALUE\ne.g. Authorization=Bearer xxx"
+    : "Environment variables, one per line: KEY=VALUE\ne.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx";
+});
+
 $("mcp-test-btn").onclick = async () => {
   const body = mcpFormBody();
-  if (!body.name || !body.command) { $("mcp-out").textContent = "name and command required"; return; }
-  $("mcp-out").textContent = "testing… (the first npx run downloads the package, give it a minute)";
+  if (!body.name || (!body.command && !body.url)) { $("mcp-out").textContent = "name and command or URL required"; return; }
+  $("mcp-out").textContent = body.url ? "testing…" : "testing… (the first npx run downloads the package, give it a minute)";
   const r = await api("/api/mcp/test", { method: "POST", body });
   const j = await r.json().catch(() => ({}));
   $("mcp-out").textContent = j.ok
@@ -1500,12 +1555,14 @@ $("mcp-test-btn").onclick = async () => {
 
 $("mcp-add-btn").onclick = async () => {
   const body = mcpFormBody();
-  if (!body.name || !body.command) { $("mcp-out").textContent = "name and command required"; return; }
+  if (!body.name || (!body.command && !body.url)) { $("mcp-out").textContent = "name and command or URL required"; return; }
   const r = await api("/api/mcp", { method: "POST", body });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $("mcp-out").textContent = j.detail || "failed"; return; }
   $("mcp-out").textContent = "added ✓ — its tools are available in the next chat";
-  $("mcp-name").value = ""; $("mcp-command").value = ""; $("mcp-args").value = ""; $("mcp-env").value = "";
+  $("mcp-name").value = ""; $("mcp-command").value = ""; $("mcp-args").value = ""; $("mcp-env").value = ""; $("mcp-url").value = "";
+  $("mcp-command").disabled = false;
+  $("mcp-args").disabled = false;
   loadMcpTab();
 };
 
@@ -1750,7 +1807,7 @@ const THEMES = {
       "--text": "#e6edf4", "--muted": "#8b96a8", "--accent": "#4f8cff", "--accent2": "#22c55e", "--accent3": "#a78bfa",
       "--glow-a": "rgba(79,140,255,.18)", "--glow-b": "rgba(167,139,250,.12)",
       "--surface-sidebar": "rgba(22,27,34,.7)", "--surface-topbar": "rgba(22,27,34,.5)", "--surface-card": "rgba(22,27,34,.9)",
-      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.03)", "--code-bg": "rgba(0,0,0,.25)",
+      "--row-tint": "rgba(255,255,255,.03)", "--code-bg": "rgba(0,0,0,.25)",
     },
   },
   midnight: {
@@ -1760,7 +1817,7 @@ const THEMES = {
       "--text": "#e8eaff", "--muted": "#8f96c0", "--accent": "#7c5cff", "--accent2": "#34d399", "--accent3": "#38bdf8",
       "--glow-a": "rgba(124,92,255,.2)", "--glow-b": "rgba(56,189,248,.12)",
       "--surface-sidebar": "rgba(11,14,29,.75)", "--surface-topbar": "rgba(11,14,29,.55)", "--surface-card": "rgba(11,14,29,.92)",
-      "--overlay": "rgba(0,0,0,.65)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.35)",
+      "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.35)",
     },
   },
   light: {
@@ -1770,7 +1827,7 @@ const THEMES = {
       "--text": "#1a2233", "--muted": "#5b6577", "--accent": "#2563eb", "--accent2": "#16a34a", "--accent3": "#7c3aed",
       "--glow-a": "rgba(37,99,235,.1)", "--glow-b": "rgba(124,58,237,.08)",
       "--surface-sidebar": "rgba(255,255,255,.8)", "--surface-topbar": "rgba(255,255,255,.65)", "--surface-card": "rgba(255,255,255,.95)",
-      "--overlay": "rgba(15,23,42,.35)", "--row-tint": "rgba(15,23,42,.04)", "--code-bg": "rgba(15,23,42,.06)",
+      "--row-tint": "rgba(15,23,42,.04)", "--code-bg": "rgba(15,23,42,.06)",
     },
   },
   ocean: {
@@ -1780,7 +1837,7 @@ const THEMES = {
       "--text": "#e2f3ff", "--muted": "#7fa8bf", "--accent": "#06b6d4", "--accent2": "#34d399", "--accent3": "#60a5fa",
       "--glow-a": "rgba(6,182,212,.16)", "--glow-b": "rgba(96,165,250,.12)",
       "--surface-sidebar": "rgba(8,32,50,.75)", "--surface-topbar": "rgba(8,32,50,.55)", "--surface-card": "rgba(8,32,50,.92)",
-      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+      "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
     },
   },
   forest: {
@@ -1790,7 +1847,7 @@ const THEMES = {
       "--text": "#e7f5ec", "--muted": "#86a896", "--accent": "#22c55e", "--accent2": "#a3e635", "--accent3": "#fbbf24",
       "--glow-a": "rgba(34,197,94,.14)", "--glow-b": "rgba(163,230,53,.1)",
       "--surface-sidebar": "rgba(13,31,20,.75)", "--surface-topbar": "rgba(13,31,20,.55)", "--surface-card": "rgba(13,31,20,.92)",
-      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+      "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
     },
   },
   sunset: {
@@ -1800,7 +1857,7 @@ const THEMES = {
       "--text": "#fdeef4", "--muted": "#b58a9c", "--accent": "#fb7185", "--accent2": "#fbbf24", "--accent3": "#f472b6",
       "--glow-a": "rgba(251,113,133,.16)", "--glow-b": "rgba(244,114,182,.12)",
       "--surface-sidebar": "rgba(34,19,28,.75)", "--surface-topbar": "rgba(34,19,28,.55)", "--surface-card": "rgba(34,19,28,.92)",
-      "--overlay": "rgba(0,0,0,.6)", "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
+      "--row-tint": "rgba(255,255,255,.04)", "--code-bg": "rgba(0,0,0,.3)",
     },
   },
 };
