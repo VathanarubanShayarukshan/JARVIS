@@ -128,7 +128,7 @@ button:disabled { opacity: .5; cursor: default; }
 .card input { margin-top: 2px; }
 
 /* ---------- app layout ---------- */
-.app { display: flex; height: 100vh; overflow: hidden; }
+.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .app:not(.hidden) { animation: fadein .2s ease; }
 
 .sidebar {
@@ -159,10 +159,42 @@ button:disabled { opacity: .5; cursor: default; }
   transition: background .12s, color .12s;
 }
 .session-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.session-ico { display: inline-flex; flex-shrink: 0; color: var(--muted); }
+.session-ico svg { width: 14px; height: 14px; }
 .session-item:hover { background: var(--bg3); color: var(--text); }
-.session-item.active { background: var(--bg3); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.session-item.active { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--text); }
+.session-item.active .session-ico { color: var(--accent); }
 .session-item .del { margin-left: auto; opacity: 0; border: none; background: none; padding: 2px 6px; color: var(--danger); font-size: 12px; flex-shrink: 0; }
 .session-item:hover .del { opacity: 1; }
+.session-item.sub { margin-left: 14px; padding: 7px 9px; font-size: 12.5px; }
+
+.list-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 12px 10px 5px; }
+.proj-folder { margin-bottom: 2px; }
+.folder-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 9px;
+  border-radius: 10px;
+  text-align: left;
+}
+.folder-head:hover { background: var(--bg3); }
+.fold-chev { width: 12px; height: 12px; flex-shrink: 0; color: var(--muted); transition: transform .15s; }
+.fold-chev.open { transform: rotate(90deg); }
+.fold-ico { width: 15px; height: 15px; flex-shrink: 0; color: var(--accent); }
+.folder-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.folder-count { font-size: 11px; color: var(--muted); background: var(--row-tint); border: 1px solid var(--border); border-radius: 9px; padding: 0 7px; }
+.folder-kids { padding: 1px 0 4px; }
+.folder-empty { margin: 2px 10px 6px 30px; }
+
+.sidebar-scrim { display: none; }
+.menu-btn { display: none; }
 
 .sidebar-foot { padding: 10px 12px; border-top: 1px solid var(--border); }
 
@@ -452,7 +484,9 @@ button.send.stopping { background: var(--danger); }
 .composer textarea:focus { box-shadow: none; background: none; }
 
 .composer-input-row { display: flex; align-items: center; gap: 4px; padding: 6px 8px; }
-.composer-input-row textarea { flex: 1; min-width: 0; max-height: 220px; height: 42px; resize: none; width: auto; padding: 0 8px; margin: 0; border-radius: 20px; line-height: 42px; font-size: 15px; }
+.composer-input-row textarea { flex: 1; min-width: 0; max-height: 220px; height: 42px; resize: none; width: auto; padding: 0 8px; margin: 0; border-radius: 20px; line-height: 42px; font-size: 15px; scrollbar-width: none; }
+.composer-input-row textarea::-webkit-scrollbar { display: none; }
+.composer-input-row textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-input-row .voice-btn { font-size: 18px; height: 36px; width: 36px; padding: 0; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: none; border: none; }
 .composer-input-row .send { height: 36px; width: 36px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent); border: none; color: #fff; font-size: 16px; flex-shrink: 0; }
 .composer-input-row .send:hover { filter: brightness(1.1); }
@@ -692,20 +726,45 @@ details.add-provider[open] summary { margin-bottom: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* responsive */
-@media (max-width: 760px) {
-  .sidebar { width: 72px; min-width: 72px; }
-  .session-item { font-size: 0; justify-content: center; }
-  .session-item::before { content: "•"; font-size: 14px; }
-  .session-item .del { display: none; }
-  .sidebar-head .new-chat { font-size: 0; }
-  .sidebar-head .new-chat::before { content: "+"; font-size: 16px; }
-  .sidebar-foot { padding: 8px; }
-  .sidebar-foot .ghost { font-size: 0; padding: 8px; }
-  .sidebar-foot .ghost::before { content: "⏻"; font-size: 14px; }
-  .skill-select { max-width: 30vw; }
+@media (max-width: 900px) {
+  .menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    width: min(290px, 84vw);
+    min-width: 0;
+    transform: translateX(-102%);
+    transition: transform .22s ease;
+  }
+  .app.nav-open .sidebar { transform: translateX(0); box-shadow: 0 0 44px rgba(0, 0, 0, .5); }
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 65;
+    background: rgba(0, 0, 0, .5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+  .app.nav-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
+  .session-item .del { opacity: .55; }
+  .topbar { padding: 0 10px; gap: 8px; }
+  .topbar-left, .topbar-right { gap: 6px; }
+  .skill-hint-vbar { display: none; }
+  .skill-select { width: 120px; max-width: 27vw; }
+  .project-select { width: 120px; max-width: 27vw; }
+  .chat-inner { padding: 0 12px; }
+  .msg.user .body { max-width: 92%; }
+  .composer-wrap { padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .composer-input-row .model-pill { max-width: 34vw; }
+  .composer-input-row textarea { font-size: 16px; }
+  .composer-note { padding: 0 6px; }
   .file-body { flex-direction: column; }
   .file-tree { width: 100%; max-height: 200px; }
-  .msg.user .body { max-width: 92%; }
 }
 /* ---------- MCP / skills / projects / appearance tabs ---------- */
 .field-label { display: block; margin: 12px 0 6px; color: var(--muted); font-size: 12px; letter-spacing: .03em; }

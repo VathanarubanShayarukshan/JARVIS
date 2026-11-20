@@ -6,6 +6,15 @@ import httpx
 
 from .config import settings
 
+_shared_client: httpx.AsyncClient | None = None
+
+
+def shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0))
+    return _shared_client
+
 
 @dataclass
 class Provider:
@@ -24,14 +33,13 @@ async def probe(base_url: str, key: str | None = None) -> list[str] | None:
     url = base_url.rstrip("/") + "/models"
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(url, headers=headers)
-            if r.status_code != 200:
-                return None
-            data = r.json()
-            ids = [m.get("id", "") for m in data.get("data", [])]
-            ids = [i for i in ids if i and not i.startswith("_")]
-            return ids or None
+        r = await shared_client().get(url, headers=headers, timeout=3.0)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        ids = [m.get("id", "") for m in data.get("data", [])]
+        ids = [i for i in ids if i and not i.startswith("_")]
+        return ids or None
     except Exception:
         return None
 
@@ -135,33 +143,33 @@ class LLMClient:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-            try:
-                async with client.stream(
-                    "POST", self.provider.chat_url, json=body, headers=self._headers()
-                ) as resp:
-                    if resp.status_code != 200:
-                        text = (await resp.aread()).decode(errors="replace")
-                        raise LLMError(f"Provider error {resp.status_code}: {text[:500]}")
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload or payload == "[DONE]":
-                            continue
-                        import json
+        client = shared_client()
+        try:
+            async with client.stream(
+                "POST", self.provider.chat_url, json=body, headers=self._headers()
+            ) as resp:
+                if resp.status_code != 200:
+                    text = (await resp.aread()).decode(errors="replace")
+                    raise LLMError(f"Provider error {resp.status_code}: {text[:500]}")
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    import json
 
-                        try:
-                            chunk = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        yield delta.get("content") or "", chunk
-            except httpx.HTTPError as e:
-                raise LLMError(f"Cannot reach provider at {self.provider.base_url}: {e}") from e
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    yield delta.get("content") or "", chunk
+        except httpx.HTTPError as e:
+            raise LLMError(f"Cannot reach provider at {self.provider.base_url}: {e}") from e
 
 
 DEFAULT_SYSTEM_PROMPT = """You are JARVIS, an autonomous coding and general-purpose agent running in a self-hosted sandbox.

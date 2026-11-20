@@ -87,6 +87,7 @@ function showScreen(name) {
 
 async function boot() {
   const health = await json(await fetch("/api/health"));
+  $("ws-path").textContent = health.workspace || "";
   if (!health.setup_done) { showScreen("setup-screen"); return; }
   if (!state.token) { showScreen("login-screen"); return; }
   try {
@@ -104,7 +105,11 @@ async function enterApp() {
   showScreen("app");
   const saved = localStorage.getItem("session");
   if (saved && state.sessions.some((s) => s.id === saved)) await selectSession(saved);
-  else await newSession();
+  else {
+    const running = state.jobs.find((j) => j.status === "running");
+    if (running) await selectSession(running.session_id);
+    else await newSession();
+  }
 }
 
 $("setup-btn").onclick = async () => {
@@ -206,12 +211,26 @@ async function loadSessions() {
 function renderSessions() {
   const list = $("session-list");
   list.innerHTML = "";
+  let collapsed;
+  try { collapsed = new Set(JSON.parse(localStorage.getItem("collapsedProjects") || "[]")); }
+  catch { collapsed = new Set(); }
+  const byProject = new Map();
+  const loose = [];
   for (const s of state.sessions) {
+    if (s.project_id && state.projects.some((p) => p.id === s.project_id)) {
+      if (!byProject.has(s.project_id)) byProject.set(s.project_id, []);
+      byProject.get(s.project_id).push(s);
+    } else loose.push(s);
+  }
+
+  const makeRow = (s, sub) => {
     const item = document.createElement("div");
-    item.className = "session-item" + (s.id === state.sessionId ? " active" : "");
+    item.className = "session-item" + (sub ? " sub" : "") + (s.id === state.sessionId ? " active" : "");
+    item.innerHTML = '<span class="session-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg></span>';
     const title = document.createElement("span");
     title.className = "session-title";
     title.textContent = s.title || "Untitled";
+    title.title = s.title || "Untitled";
     item.appendChild(title);
     if (runningJobFor(s.id)) {
       const dot = document.createElement("span");
@@ -232,11 +251,47 @@ function renderSessions() {
       await loadJobs();
     };
     item.appendChild(del);
-    list.appendChild(item);
+    return item;
+  };
+
+  for (const p of state.projects) {
+    const kids = byProject.get(p.id) || [];
+    const folder = document.createElement("div");
+    folder.className = "proj-folder";
+    const head = document.createElement("button");
+    head.className = "folder-head";
+    head.title = p.name;
+    head.innerHTML =
+      `<svg class="fold-chev${collapsed.has(p.id) ? "" : " open"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>` +
+      '<svg class="fold-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' +
+      `<span class="folder-name">${esc(p.name)}</span><span class="folder-count">${kids.length}</span>`;
+    head.onclick = () => {
+      if (collapsed.has(p.id)) collapsed.delete(p.id); else collapsed.add(p.id);
+      localStorage.setItem("collapsedProjects", JSON.stringify([...collapsed]));
+      renderSessions();
+    };
+    folder.appendChild(head);
+    if (!collapsed.has(p.id)) {
+      const box = document.createElement("div");
+      box.className = "folder-kids";
+      if (!kids.length) box.innerHTML = '<p class="muted small folder-empty">No chats yet — pick this project in the top bar, then start a chat.</p>';
+      for (const s of kids) box.appendChild(makeRow(s, true));
+      folder.appendChild(box);
+    }
+    list.appendChild(folder);
+  }
+
+  if (loose.length || !state.projects.length) {
+    const label = document.createElement("div");
+    label.className = "list-label";
+    label.textContent = state.projects.length ? "Chats" : "Recent chats";
+    list.appendChild(label);
+    for (const s of loose) list.appendChild(makeRow(s, false));
   }
 }
 
 async function newSession() {
+  $("app").classList.remove("nav-open");
   const s = await json(await api("/api/sessions", {
     method: "POST",
     body: { project_id: $("project-select").value || null },
@@ -251,6 +306,7 @@ async function newSession() {
 }
 
 async function selectSession(id) {
+  $("app").classList.remove("nav-open");
   if (state.busy && state.jobId && state.sessionId !== id) pushToBackground(true);
   state.sessionId = id;
   localStorage.setItem("session", id);
@@ -266,6 +322,8 @@ async function selectSession(id) {
 }
 
 $("new-chat-btn").onclick = newSession;
+$("menu-btn").onclick = () => $("app").classList.toggle("nav-open");
+$("sidebar-scrim").onclick = () => $("app").classList.remove("nav-open");
 
 /* ---------------- chat rendering ---------------- */
 
@@ -451,6 +509,11 @@ function updateBanner() {
 function pushToBackground() {
   if (!state.busy || !state.ctrl) return;
   state.detached = true;
+  if (state.jobId) {
+    const banner = $("bg-banner");
+    banner.dataset.job = state.jobId;
+    banner.classList.remove("hidden");
+  }
   state.ctrl.abort();
 }
 
@@ -1084,7 +1147,9 @@ $("settings-search").addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("settings-modal").classList.contains("hidden")) closeSettings();
+  if (e.key !== "Escape") return;
+  if (!$("settings-modal").classList.contains("hidden")) closeSettings();
+  else $("app").classList.remove("nav-open");
 });
 
 /* ---------------- integrations: Telegram + WhatsApp ---------------- */
@@ -1183,6 +1248,7 @@ $("tg-save").onclick = async () => {
 };
 
 async function openSettings() {
+  $("app").classList.remove("nav-open");
   $("settings-modal").classList.remove("hidden");
   $("settings-search").value = "";
   $("settings-search").dispatchEvent(new Event("input"));

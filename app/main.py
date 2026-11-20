@@ -22,7 +22,7 @@ from . import database as db
 from . import jobs as jobs_mod
 from . import projects as projects_mod
 from .config import settings
-from .llm import LLMError, detect_free_providers, from_env_provider, probe
+from .llm import LLMError, detect_free_providers, from_env_provider, probe, shared_client
 from .mcp import manager as mcp_manager, presets as mcp_presets
 from .presets import preset_hint
 from .skills import (
@@ -42,6 +42,7 @@ WEBUI_DIR = Path(__file__).resolve().parent.parent / "webui"
 async def lifespan(_app: FastAPI):
     db.init_db()
     jobs_mod.manager.init()
+    shared_client()
     token = db.get_setting("telegram_token")
     enabled = db.get_setting("telegram_enabled") == "1"
     if token and enabled:

@@ -35,6 +35,7 @@
 
 <!-- ---------- main app ---------- -->
 <div id="app" class="app hidden">
+  <div id="sidebar-scrim" class="sidebar-scrim"></div>
   <aside class="sidebar">
     <div class="sidebar-head">
       <button class="new-chat" id="new-chat-btn">+ New chat</button>
@@ -49,6 +50,7 @@
   <main class="main">
     <header class="topbar">
       <div class="topbar-left">
+        <button class="icon-btn menu-btn" id="menu-btn" title="Chat history">☰</button>
         <select id="project-select" class="project-select" title="Project — attaches instructions + knowledge to this chat">
           <option value="">No project</option>
         </select>
@@ -103,7 +105,7 @@
           </div>
         </div>
       </div>
-      <p class="composer-note muted">Work happens in the server workspace: <span id="ws-path"></span></p>
+      <p class="composer-note muted">Workspace: <span id="ws-path"></span> · Tasks keep running on the server even if you close this window.</p>
     </div>
   </main>
 
