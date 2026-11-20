@@ -7,8 +7,8 @@ End users need NO API key. The self-hoster configures a free-tier provider
 from __future__ import annotations
 
 import json
+import re
 import secrets
-import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import commands as commands_mod
 from . import database as db
 from . import jobs as jobs_mod
 from . import projects as projects_mod
@@ -29,7 +30,6 @@ from .skills import (
     delete_skill,
     get_skill_content,
     list_skills,
-    load_skill,
     save_skill,
     slugify,
     valid_id,
@@ -282,6 +282,30 @@ def set_title(session_id: str, body: dict[str, Any]) -> dict[str, str]:
     return {"ok": "saved"}
 
 
+@app.post("/api/sessions/{session_id}/stop", dependencies=[Depends(require_any)])
+async def stop_session(session_id: str) -> dict[str, Any]:
+    """Cancel the agent task itself, not just the stream the client is reading."""
+    job = jobs_mod.manager.running_for_session(session_id)
+    if not job:
+        return {"ok": False, "job_id": None}
+    ok = await jobs_mod.manager.stop(job.id)
+    return {"ok": ok, "job_id": job.id}
+
+
+# --------------------------------------------------------------------------
+# ui preferences — stored server-side so every device shares one setup
+# --------------------------------------------------------------------------
+
+@app.get("/api/preferences", dependencies=[Depends(require_any)])
+def preferences_get() -> dict[str, Any]:
+    return db.get_ui_prefs()
+
+
+@app.put("/api/preferences", dependencies=[Depends(require_any)])
+def preferences_put(body: dict[str, Any]) -> dict[str, Any]:
+    return db.update_ui_prefs(body or {})
+
+
 def _resolve_provider(provider_id: str | None) -> Any:
     """Resolve a Provider from the DB (raw keys), env config, or a local LLM."""
     from .llm import Provider
@@ -367,6 +391,9 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     if jobs_mod.manager.running_for_session(session_id):
         return JSONResponse(status_code=409, content={"detail": "a task is already running in this chat — resume or stop it first"})
 
+    if (session.get("title") or "").strip() in ("", "New chat"):
+        db.set_session_title(session_id, commands_mod.title_from(message))
+
     try:
         provider = _resolve_provider(body.get("provider_id"))
     except LLMError as e:
@@ -376,8 +403,10 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     if not model:
         return JSONResponse(status_code=400, content={"detail": "no model selected"})
 
-    skill_id = str(body.get("skill") or "").strip()
-    skill_body = load_skill(skill_id) if skill_id else None
+    parsed = commands_mod.parse(message)
+    explicit_skill = str(body.get("skill") or "").strip()
+    skill_ids = list(dict.fromkeys(([explicit_skill] if explicit_skill else []) + parsed["skills"]))
+    skill_body = commands_mod.skill_block(skill_ids) or None
 
     attach = body.get("attachments") or []
     attach = [str(a).strip() for a in attach if str(a).strip()]
@@ -389,7 +418,12 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     effective = message
     if skill_body:
         effective = f"{skill_body}\n\n---\n\nTask:\n{message}"
-    extra_system = projects_mod.build_context(session.get("project_id")) or None
+    extra_system = "\n\n".join(
+        part for part in (
+            projects_mod.build_context(session.get("project_id")),
+            commands_mod.mcp_block(parsed["servers"]),
+        ) if part
+    ) or None
 
     job = jobs_mod.manager.start(session_id, provider, model, effective, extra_system)
 
@@ -514,6 +548,11 @@ def mcp_list() -> dict[str, Any]:
     return {"servers": db.list_mcp_servers(), "presets": mcp_presets()}
 
 
+@app.get("/api/mcp/tools", dependencies=[Depends(require_any)])
+async def mcp_tools(connect: int = 0) -> dict[str, Any]:
+    return {"servers": await mcp_manager.catalog(connect=bool(connect))}
+
+
 @app.post("/api/mcp", dependencies=[Depends(require_web)])
 def mcp_add(body: dict[str, Any]) -> dict[str, Any]:
     name, command, args, env, url = _mcp_fields(body)
@@ -582,13 +621,25 @@ def projects_list() -> list[dict[str, Any]]:
     return db.list_projects()
 
 
+def _project_style(body: dict[str, Any], cur: dict[str, Any] | None = None) -> tuple[str, str]:
+    cur = cur or {}
+    icon = str(body["icon"] if "icon" in body else cur.get("icon") or "").strip()[:8]
+    color = str(body["color"] if "color" in body else cur.get("color") or "").strip()
+    if any(c in icon for c in "<>&\"'"):
+        raise HTTPException(status_code=400, detail="icon must be a plain emoji or character")
+    if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        raise HTTPException(status_code=400, detail="color must be a hex value like #4f8cff")
+    return icon, color.lower()
+
+
 @app.post("/api/projects", dependencies=[Depends(require_any)])
 def projects_create(body: dict[str, Any]) -> dict[str, Any]:
     name = str(body.get("name") or "").strip()[:80]
     if not name:
         raise HTTPException(status_code=400, detail="name required")
+    icon, color = _project_style(body)
     pid = projects_mod.new_id()
-    db.create_project(pid, name, str(body.get("instructions") or ""))
+    db.create_project(pid, name, str(body.get("instructions") or ""), icon, color)
     return db.get_project(pid) or {}
 
 
@@ -608,7 +659,8 @@ def projects_update(project_id: str, body: dict[str, Any]) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="project not found")
     name = str(body.get("name") or p["name"]).strip()[:80]
     instructions = str(body.get("instructions") if "instructions" in body else p["instructions"] or "")
-    db.update_project(project_id, name, instructions)
+    icon, color = _project_style(body, p)
+    db.update_project(project_id, name, instructions, icon, color)
     return {"ok": "saved"}
 
 

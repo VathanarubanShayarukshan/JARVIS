@@ -51,21 +51,17 @@
     <header class="topbar">
       <div class="topbar-left">
         <button class="icon-btn menu-btn" id="menu-btn" title="Chat history">☰</button>
-        <select id="project-select" class="project-select" title="Project — attaches instructions + knowledge to this chat">
-          <option value="">No project</option>
-        </select>
-        <select id="skill-select" class="skill-select" title="Skill">
-          <option value="">No skill</option>
-        </select>
-        <span class="skill-hint-vbar"></span>
+        <button class="chat-title-btn" id="chat-title-btn" title="Rename this chat">
+          <span id="chat-title">New chat</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>
+        </button>
+        <button class="proj-chip hidden" id="proj-chip" title="Open project settings"></button>
       </div>
       <div class="topbar-right">
-        <label class="switch-pill" title="Show the thinking / status indicator">
-          <input type="checkbox" id="toggle-thinking" checked><span class="sw"></span><span class="sw-label">Thinking</span>
-        </label>
-        <label class="switch-pill" title="Show the tool / process log">
-          <input type="checkbox" id="toggle-toollog" checked><span class="sw"></span><span class="sw-label">Tool log</span>
-        </label>
+        <span class="sync-pill" id="sync-pill" title="Your settings are stored on the server and follow you to every device">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1-.6-7.96 5.5 5.5 0 0 1 10.5-1.2A3.75 3.75 0 0 1 17.5 18z"/><path d="m9.5 13.5 1.8 1.8 3.4-3.6"/></svg>
+          <span id="sync-text">Synced</span>
+        </span>
         <select id="voice-lang" class="voice-lang hidden" title="Voice language">
           <option value="en-US">English</option>
           <option value="en-IN">English (Tamil accented)</option>
@@ -85,23 +81,35 @@
         <button id="bg-resume" class="primary">Resume</button>
         <button id="bg-stop" class="ghost">Stop</button>
       </div>
-      <div class="composer">
-        <div id="attach-bar" class="attach-bar hidden"></div>
-        <div class="composer-input-row">
-          <input type="file" id="attach-input" class="file-input" multiple>
-          <button id="attach-btn" class="attach-plus" title="Attach files">+</button>
-          <textarea id="input" rows="1" placeholder="Ask JARVIS anything…"></textarea>
-          <select id="model-select" class="model-pill" title="Choose model"></select>
-          <button id="voice-btn" class="voice-btn" title="Voice chat — tap to speak">🎤</button>
-          <button id="push-btn" class="push hidden" title="Push to background — the task keeps running on the server, even if you close this window">⤓</button>
-          <button id="send-btn" class="send" title="Send message">↑</button>
+      <div class="composer-shell">
+        <div id="cmd-palette" class="cmd-palette hidden" role="listbox" aria-label="Commands">
+          <div class="cmd-head">
+            <span id="cmd-kind">Skills</span>
+            <span class="flex-spacer"></span>
+            <span class="cmd-keys muted small"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>↵</kbd> pick · <kbd>esc</kbd> close</span>
+          </div>
+          <div id="cmd-list" class="cmd-list"></div>
+          <div class="cmd-foot muted small" id="cmd-foot"></div>
         </div>
-        <div class="composer-foot">
-          <div class="composer-left">
-            <span id="voice-status" class="voice-status hidden"></span>
-            <label class="hint">
-              <input type="checkbox" id="auto-title"> auto-title chats
-            </label>
+        <div class="composer">
+          <div id="attach-bar" class="attach-bar hidden"></div>
+          <div id="cmd-chips" class="cmd-chips hidden"></div>
+          <div class="composer-input-row">
+            <input type="file" id="attach-input" class="file-input" multiple>
+            <button id="attach-btn" class="attach-plus" title="Attach files">+</button>
+            <textarea id="input" rows="1" placeholder="Ask JARVIS anything…   / skills   @ MCP"></textarea>
+            <select id="model-select" class="model-pill" title="Choose model"></select>
+            <button id="voice-btn" class="voice-btn" title="Voice chat — tap to speak">🎤</button>
+            <button id="push-btn" class="push hidden" title="Push to background — the task keeps running on the server, even if you close this window">⤓</button>
+            <button id="send-btn" class="send" title="Send message">↑</button>
+          </div>
+          <div class="composer-foot">
+            <div class="composer-left">
+              <button class="cmd-hint" id="slash-hint" title="Insert a skill command"><kbd>/</kbd> Skills</button>
+              <button class="cmd-hint" id="at-hint" title="Mention an MCP server"><kbd>@</kbd> MCP</button>
+              <span id="voice-status" class="voice-status hidden"></span>
+            </div>
+            <span class="composer-ctx muted small" id="composer-ctx"></span>
           </div>
         </div>
       </div>
@@ -121,10 +129,11 @@
         <div class="set-group">General</div>
         <button class="set-item active" data-tab="models"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Models</button>
         <button class="set-item" data-tab="appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.5"/><circle cx="7" cy="16" r="2.5"/></svg>Appearance</button>
-        <button class="set-item" data-tab="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/></svg>Account</button>
+        <button class="set-item" data-tab="chat" data-keys="thinking tool log reasoning logs auto name title rename prompt commands slash at mcp background stop push"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M8.5 11h7M8.5 14h4"/></svg>Chat &amp; logs</button>
+        <button class="set-item" data-tab="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-5.5 8-5.5s6.5 1.5 8.5 5.5"/></svg>Account</button>
         <div class="set-group">Agent</div>
         <button class="set-item" data-tab="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 1 2-2h14"/><path d="m12 7 1.2 2.4L16 10l-2.8.6L12 13l-1.2-2.4L8 10l2.8-.6z"/></svg>Skills</button>
-        <button class="set-item" data-tab="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5"/><path d="m3 13 9 5 9-5"/></svg>Projects</button>
+        <button class="set-item" data-tab="projects" data-keys="folder icon colour color rename delete move knowledge instructions context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5"/><path d="m3 13 9 5 9-5"/></svg>Projects</button>
         <button class="set-item" data-tab="files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Files</button>
         <div class="set-group">Integrations</div>
         <button class="set-item" data-tab="mcp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>MCP servers</button>
@@ -168,7 +177,7 @@
       <div class="tab-panel hidden" id="tab-mcp">
         <header class="set-head">
           <h2>MCP servers</h2>
-          <p class="muted">Give JARVIS extra tools (GitHub, browsers, memory…). Connect a hosted server with a single <b>URL</b> (Streamable HTTP / SSE), or run ready-made presets with <code>npx</code> — Node.js must be on the server. Tools appear automatically in every chat.</p>
+          <p class="muted">Give JARVIS extra tools (GitHub, browsers, memory…). Connect a hosted server with a single <b>URL</b> (Streamable HTTP / SSE), or run ready-made presets with <code>npx</code> — Node.js must be on the server. Tools appear automatically in every chat; type <code>@</code> in the prompt to point a task at one server.</p>
         </header>
         <section class="set-card">
           <h3 class="set-card-title">Ready-made presets</h3>
@@ -204,7 +213,7 @@
       <div class="tab-panel hidden" id="tab-skills">
         <header class="set-head">
           <h2>Skills</h2>
-          <p class="muted">Markdown instruction packs. Pick one in the top bar to prepend it to your next task. Changes apply instantly — no restart.</p>
+          <p class="muted">Markdown instruction packs. Type <code>/</code> in the chat box and pick one — it is prepended to that task. Changes apply instantly, no restart.</p>
         </header>
         <section class="set-card">
           <div class="row">
@@ -232,7 +241,7 @@
       <div class="tab-panel hidden" id="tab-projects">
         <header class="set-head">
           <h2>Projects</h2>
-          <p class="muted">Bundle <b>instructions + knowledge files</b> (notes, docs, specs). Select a project in the top bar and every chat under it gets that context automatically.</p>
+          <p class="muted">Bundle <b>instructions + knowledge files</b> (notes, docs, specs). Every chat inside a project folder gets that context automatically. Create projects with the <b>+</b> in the sidebar, and drag any chat into a folder to move it.</p>
         </header>
         <section class="set-card">
           <div class="row">
@@ -247,6 +256,14 @@
             <button id="proj-save-btn" class="primary">Save</button>
             <button id="proj-delete-btn" class="ghost danger-text">Delete project</button>
             <button id="proj-close-btn" class="ghost">Close</button>
+          </div>
+          <label class="field-label">Folder icon &amp; colour</label>
+          <div class="style-row">
+            <span class="proj-preview" id="proj-preview">📁</span>
+            <div class="style-pickers">
+              <div class="icon-grid" id="proj-icon-grid"></div>
+              <div class="swatch-row" id="proj-color-row"></div>
+            </div>
           </div>
           <label class="field-label">Instructions (system-level guidance for this project)</label>
           <textarea id="proj-instructions" rows="4" placeholder="e.g. This is a FastAPI app. Always run tests after changes. Reply in Tamil."></textarea>
@@ -269,7 +286,7 @@
       <div class="tab-panel hidden" id="tab-appearance">
         <header class="set-head">
           <h2>Appearance</h2>
-          <p class="muted">Theme and accent color. Saved in this browser only.</p>
+          <p class="muted">Theme and accent color, stored on your server — sign in from any device and it looks the same.</p>
         </header>
         <section class="set-card">
           <h3 class="set-card-title">Theme</h3>
@@ -280,6 +297,44 @@
           <div class="row">
             <input type="color" id="accent-picker" value="#4f8cff">
             <button id="accent-reset" class="ghost">Reset accent</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-chat">
+        <header class="set-head">
+          <h2>Chat &amp; logs</h2>
+          <p class="muted">How much of the agent's work you see while it runs. These switches live on the server, so every device you sign in from behaves the same.</p>
+        </header>
+        <section class="set-card">
+          <h3 class="set-card-title">While JARVIS works</h3>
+          <label class="switch-row">
+            <span class="switch-copy">
+              <b>Thinking indicator</b>
+              <span class="muted small">The live status line — “Thinking…”, “Running write_file…”, “Worked for 12s”.</span>
+            </span>
+            <span class="switch-pill"><input type="checkbox" id="toggle-thinking" checked><span class="sw"></span></span>
+          </label>
+          <label class="switch-row">
+            <span class="switch-copy">
+              <b>Tool log</b>
+              <span class="muted small">The expandable list of every tool call with its input and result.</span>
+            </span>
+            <span class="switch-pill"><input type="checkbox" id="toggle-toollog" checked><span class="sw"></span></span>
+          </label>
+          <p class="muted small" id="chat-pref-note">Saved to your server automatically.</p>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">Chat names</h3>
+          <p class="muted small">Every chat is named automatically from its first message. Rename any chat from its <b>⋯</b> menu in the sidebar, or by clicking the title at the top of the chat.</p>
+        </section>
+        <section class="set-card">
+          <h3 class="set-card-title">Prompt commands</h3>
+          <div class="cmd-help">
+            <div class="cmd-help-row"><kbd>/</kbd><span><b>Skills</b> — pick an instruction pack for this task, e.g. <code>/code-review</code>.</span></div>
+            <div class="cmd-help-row"><kbd>@</kbd><span><b>MCP servers</b> — point the task at a connected server, e.g. <code>@github</code>.</span></div>
+            <div class="cmd-help-row"><kbd>⤓</kbd><span><b>Push to background</b> — the task keeps running on the server; close the window and resume later.</span></div>
+            <div class="cmd-help-row"><kbd>⏹</kbd><span><b>Stop</b> — cancels the agent itself on the server, not just the output on screen.</span></div>
           </div>
         </section>
       </div>
@@ -384,6 +439,30 @@
     </main>
   </div>
 </div>
+
+<!-- ---------- overlays ---------- -->
+<div id="ctx-menu" class="ctx-menu hidden" role="menu"></div>
+
+<div id="modal-root" class="modal-root hidden">
+  <div class="modal-scrim" id="modal-scrim"></div>
+  <div class="modal" id="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-top">
+      <span class="modal-ico" id="modal-ico"></span>
+      <div class="modal-heads">
+        <h3 id="modal-title">Title</h3>
+        <p class="muted small" id="modal-text"></p>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <p class="modal-err small hidden" id="modal-err"></p>
+    <div class="modal-actions">
+      <button class="ghost" id="modal-cancel">Cancel</button>
+      <button class="primary" id="modal-ok">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="/assets/app.js"></script>
 </body>

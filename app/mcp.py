@@ -255,6 +255,42 @@ class MCPManager:
                 )
         return configs, warnings
 
+    async def catalog(self, connect: bool = False) -> list[dict[str, Any]]:
+        """Servers + their tools for the @ mention picker. Cached connections are
+        used as-is; connect=True wakes enabled servers that are still asleep."""
+        out: list[dict[str, Any]] = []
+        for meta in db.list_mcp_servers():
+            server = db.get_mcp_server(meta["id"])
+            if not server:
+                continue
+            conn = self._conns.get(meta["id"])
+            if connect and meta["enabled"] and (conn is None or conn.session is None):
+                try:
+                    conn = await asyncio.wait_for(self._ensure(server), 25.0)
+                except (asyncio.TimeoutError, Exception):
+                    conn = self._conns.get(meta["id"])
+            connected = bool(conn and conn.session is not None)
+            tools = (
+                [
+                    {"name": t.name, "description": (_attr(t, "description") or "")[:200]}
+                    for t in conn.tools
+                ]
+                if connected
+                else []
+            )
+            out.append(
+                {
+                    "id": meta["id"],
+                    "name": meta["name"],
+                    "slug": _slug(meta["name"]),
+                    "enabled": bool(meta["enabled"]),
+                    "connected": connected,
+                    "error": conn.error if conn else None,
+                    "tools": tools,
+                }
+            )
+        return out
+
     async def call_tool(self, prefixed_name: str, arguments: dict[str, Any]) -> str:
         parts = prefixed_name.split("__", 2)
         if len(parts) != 3:

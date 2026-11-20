@@ -80,6 +80,8 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 name TEXT,
                 instructions TEXT,
+                icon TEXT DEFAULT '',
+                color TEXT DEFAULT '',
                 created_at REAL,
                 updated_at REAL
             );
@@ -98,6 +100,11 @@ def init_db() -> None:
         mcols = [r["name"] for r in db.execute("PRAGMA table_info(mcp_servers)").fetchall()]
         if "url" not in mcols:
             db.execute("ALTER TABLE mcp_servers ADD COLUMN url TEXT DEFAULT ''")
+        pcols = [r["name"] for r in db.execute("PRAGMA table_info(projects)").fetchall()]
+        if "icon" not in pcols:
+            db.execute("ALTER TABLE projects ADD COLUMN icon TEXT DEFAULT ''")
+        if "color" not in pcols:
+            db.execute("ALTER TABLE projects ADD COLUMN color TEXT DEFAULT ''")
     _seed_presets()
 
 
@@ -284,6 +291,56 @@ def set_setting(key: str, value: str) -> None:
         )
 
 
+# ---------------- ui preferences (synced across every device) ----------------
+
+UI_PREF_DEFAULTS: dict[str, Any] = {
+    "theme": "dark",
+    "accent": "",
+    "showThinking": True,
+    "showToolLog": True,
+    "voiceLang": "en-US",
+    "modelKey": "",
+    "modelPrefs": {},
+    "collapsedProjects": [],
+}
+
+
+def _clean_prefs(patch: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, v in patch.items():
+        if k not in UI_PREF_DEFAULTS:
+            continue
+        if k in ("showThinking", "showToolLog"):
+            out[k] = bool(v)
+        elif k in ("modelPrefs",):
+            out[k] = {str(a): str(b) for a, b in v.items()} if isinstance(v, dict) else {}
+        elif k in ("collapsedProjects",):
+            out[k] = [str(a) for a in v][:500] if isinstance(v, list) else []
+        elif v is None:
+            out[k] = ""
+        else:
+            out[k] = str(v)[:200]
+    return out
+
+
+def get_ui_prefs() -> dict[str, Any]:
+    raw = get_setting("ui_prefs")
+    try:
+        stored = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return {**UI_PREF_DEFAULTS, **_clean_prefs(stored)}
+
+
+def update_ui_prefs(patch: dict[str, Any]) -> dict[str, Any]:
+    prefs = get_ui_prefs()
+    prefs.update(_clean_prefs(patch))
+    set_setting("ui_prefs", json.dumps(prefs, ensure_ascii=False))
+    return prefs
+
+
 # ---------------- jobs (background agent runs) ----------------
 
 def create_job(job_id: str, session_id: str) -> None:
@@ -425,21 +482,21 @@ def get_project(project_id: str) -> dict[str, Any] | None:
         return _row_to_dict(db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
 
 
-def create_project(project_id: str, name: str, instructions: str) -> None:
+def create_project(project_id: str, name: str, instructions: str, icon: str = "", color: str = "") -> None:
     import time
     with _lock, _conn() as db:
         db.execute(
-            "INSERT INTO projects(id,name,instructions,created_at,updated_at) VALUES(?,?,?,?,?)",
-            (project_id, name, instructions, time.time(), time.time()),
+            "INSERT INTO projects(id,name,instructions,icon,color,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (project_id, name, instructions, icon, color, time.time(), time.time()),
         )
 
 
-def update_project(project_id: str, name: str, instructions: str) -> None:
+def update_project(project_id: str, name: str, instructions: str, icon: str = "", color: str = "") -> None:
     import time
     with _lock, _conn() as db:
         db.execute(
-            "UPDATE projects SET name=?,instructions=?,updated_at=? WHERE id=?",
-            (name, instructions, time.time(), project_id),
+            "UPDATE projects SET name=?,instructions=?,icon=?,color=?,updated_at=? WHERE id=?",
+            (name, instructions, icon, color, time.time(), project_id),
         )
 
 
