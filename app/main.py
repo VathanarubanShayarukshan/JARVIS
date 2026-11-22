@@ -284,12 +284,11 @@ def set_title(session_id: str, body: dict[str, Any]) -> dict[str, str]:
 
 @app.post("/api/sessions/{session_id}/stop", dependencies=[Depends(require_any)])
 async def stop_session(session_id: str) -> dict[str, Any]:
-    """Cancel the agent task itself, not just the stream the client is reading."""
-    job = jobs_mod.manager.running_for_session(session_id)
-    if not job:
-        return {"ok": False, "job_id": None}
-    ok = await jobs_mod.manager.stop(job.id)
-    return {"ok": ok, "job_id": job.id}
+    """Cancel the agent tasks themselves, not just the streams the client is reading."""
+    stopped = await jobs_mod.manager.stop_session(session_id)
+    if not stopped and not db.get_session(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": bool(stopped), "job_ids": stopped}
 
 
 # --------------------------------------------------------------------------
@@ -388,8 +387,13 @@ async def chat(body: dict[str, Any], authorization: str | None = Header(default=
     session = db.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="session not found")
-    if jobs_mod.manager.running_for_session(session_id):
-        return JSONResponse(status_code=409, content={"detail": "a task is already running in this chat — resume or stop it first"})
+    running = jobs_mod.manager.running_for_session(session_id)
+    if running:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "a task is already running in this chat — resume or stop it first",
+                     "job_id": running.id},
+        )
 
     if (session.get("title") or "").strip() in ("", "New chat"):
         db.set_session_title(session_id, commands_mod.title_from(message))

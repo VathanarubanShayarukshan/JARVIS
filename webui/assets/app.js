@@ -44,6 +44,7 @@ const state = {
   ctrl: null,
   jobId: null,
   detached: false,
+  stopping: false,
   pendingFiles: [],
   dragId: null,
 };
@@ -521,7 +522,7 @@ function updateTopbar() {
 
 async function newSession(projectId) {
   $("app").classList.remove("nav-open");
-  if (state.busy && state.jobId) pushToBackground();
+  if (state.busy) detachQuietly();
   clearRunState();
   const s = await json(await api("/api/sessions", {
     method: "POST",
@@ -538,7 +539,7 @@ async function newSession(projectId) {
 
 async function selectSession(id) {
   $("app").classList.remove("nav-open");
-  if (state.busy && state.jobId && state.sessionId !== id) pushToBackground();
+  if (state.busy && state.sessionId !== id) detachQuietly();
   clearRunState();
   state.sessionId = id;
   localStorage.setItem("session", id);
@@ -548,7 +549,7 @@ async function selectSession(id) {
   renderSessions();
   updateTopbar();
   await loadJobs();
-  const job = runningJobFor(id);
+  const job = bgJobFor(id);
   if (job && !state.busy) await resumeJob(job.id);
 }
 
@@ -1222,73 +1223,108 @@ function clearRunState() {
   setBusyUI(false);
 }
 
+function bgJobFor(sessionId) {
+  if (!sessionId) return null;
+  const live = runningJobFor(sessionId);
+  if (live) return live;
+  return state.jobs.find((j) => j.id === state.jobId && j.session_id === sessionId) || null;
+}
+
 function updateBanner() {
   const banner = $("bg-banner");
-  const job = state.sessionId ? runningJobFor(state.sessionId) : null;
+  const job = bgJobFor(state.sessionId);
   if (job && !state.busy) {
     banner.dataset.job = job.id;
     banner.classList.remove("hidden");
+    $("bg-text").textContent = "Working in the background — close this window if you like, it keeps running.";
+    $("send-btn").textContent = "▶";
+    $("send-btn").title = "Resume the running task";
   } else {
     banner.classList.add("hidden");
+    delete banner.dataset.job;
+    if (!state.busy) {
+      $("send-btn").textContent = "↑";
+      $("send-btn").title = "Send message";
+    }
   }
 }
 
 function pushToBackground() {
-  if (!state.busy) return;
+  if (!state.busy || !state.jobId) return false;
   state.detached = true;
-  if (state.jobId) {
-    const banner = $("bg-banner");
-    banner.dataset.job = state.jobId;
-    banner.classList.remove("hidden");
-    $("bg-text").textContent = "Working in the background — you can close this window.";
-  }
   if (state.ctrl) state.ctrl.abort();
   setBusyUI(false);
+  updateBanner();
   if (uiState.activity) uiState.activity.status("Working in background…");
+  return true;
 }
 
-$("push-btn").onclick = () => {
-  pushToBackground();
+function detachQuietly() {
+  if (pushToBackground()) return;
+  if (!state.busy) return;
+  state.detached = true;
+  if (state.ctrl) state.ctrl.abort();
+  state.ctrl = null;
+  setBusyUI(false);
+  loadJobs().then(() => { updateBanner(); renderSessions(); }).catch(() => {});
+}
+
+$("push-btn").onclick = async () => {
+  if (!state.busy) return;
+  const btn = $("push-btn");
+  if (!state.jobId) {
+    btn.disabled = true;
+    await loadJobs();
+    const job = bgJobFor(state.sessionId);
+    if (job) state.jobId = job.id;
+    btn.disabled = false;
+  }
+  if (!pushToBackground()) {
+    toast("JARVIS has not reached the server yet — try again in a second.", { kind: "warn" });
+    return;
+  }
   toast("Task pushed to the background — it keeps running on the server.", { kind: "info" });
 };
+
 $("bg-resume").onclick = () => {
-  const id = $("bg-banner").dataset.job;
+  const job = bgJobFor(state.sessionId);
+  const id = (job && job.id) || $("bg-banner").dataset.job;
   if (id) resumeJob(id);
 };
+
 $("bg-stop").onclick = async () => {
-  const id = $("bg-banner").dataset.job;
-  if (!id) return;
+  if (!bgJobFor(state.sessionId) && !$("bg-banner").dataset.job) return;
   $("bg-text").textContent = "Stopping the task…";
-  await api(`/api/jobs/${id}/stop`, { method: "POST" }).catch(() => {});
-  if (state.sessionId) await api(`/api/sessions/${state.sessionId}/stop`, { method: "POST" }).catch(() => {});
-  await loadJobs();
-  updateBanner();
-  renderSessions();
+  await stopCurrent();
   toast("Task stopped on the server.", { kind: "warn" });
 };
 
 async function stopCurrent() {
+  if (state.stopping) return;
   const sid = state.sessionId;
-  const run = sid ? runningJobFor(sid) : null;
-  const jobId = (run && run.id) || state.jobId;
+  const run = bgJobFor(sid);
+  const jobId = state.jobId || (run && run.id);
   if (!state.busy && !jobId) return;
+  state.stopping = true;
   state.detached = false;
-  setBusyUI(false);
   if (uiState.activity) uiState.activity.status("Stopping…");
   const calls = [];
   if (jobId) calls.push(api(`/api/jobs/${jobId}/stop`, { method: "POST" }).catch(() => {}));
   if (sid) calls.push(api(`/api/sessions/${sid}/stop`, { method: "POST" }).catch(() => {}));
   await Promise.all(calls);
   if (state.ctrl) state.ctrl.abort();
+  state.ctrl = null;
   state.jobId = null;
+  state.stopping = false;
+  setBusyUI(false);
   await loadJobs();
-  updateBanner();
   renderSessions();
+  $("input").focus();
 }
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    if (state.busy && state.ctrl) pushToBackground();
+    if (state.busy) detachQuietly();
     flushPrefs();
     return;
   }
@@ -1296,14 +1332,34 @@ document.addEventListener("visibilitychange", () => {
   loadJobs().then(() => {
     updateBanner();
     renderSessions();
-    const job = state.sessionId ? runningJobFor(state.sessionId) : null;
+    const job = bgJobFor(state.sessionId);
     if (job && !state.busy && state.detached) resumeJob(job.id);
   }).catch(() => {});
 });
 window.addEventListener("pagehide", () => {
-  if (state.busy && state.ctrl) pushToBackground();
+  if (state.busy) detachQuietly();
   flushPrefs();
 });
+
+window.addEventListener("beforeunload", (e) => {
+  if (!state.busy || state.detached) return;
+  e.preventDefault();
+  e.returnValue = "";
+  setTimeout(() => {
+    if (state.busy && !state.detached && document.visibilityState === "visible") askLeaveChoice();
+  }, 500);
+});
+
+async function askLeaveChoice() {
+  const r = await openModal({
+    title: "JARVIS is still working on this prompt",
+    text: "Closing the tab does not stop it — the server runs every remaining step. Run it in the background, or stay and watch it live.",
+    icon: "⤓",
+    okLabel: "Run in background",
+    cancelLabel: "Stay in this tab",
+  });
+  if (r) pushToBackground();
+}
 
 async function readSSE(r, asBody) {
   const reader = r.body.getReader();
@@ -1339,10 +1395,12 @@ async function send() {
   const text = input.value.trim();
   const attachments = state.pendingFiles.slice();
   closePalette();
-  if ((!text && !attachments.length) || !state.sessionId || state.busy) return;
-  if (runningJobFor(state.sessionId)) {
-    toast("A task is already running in this chat — resume it from the banner, or press ⏹ first.", { kind: "warn" });
-    return;
+  if (state.stopping || state.busy) return false;
+  if ((!text && !attachments.length) || !state.sessionId) return false;
+  const running = bgJobFor(state.sessionId);
+  if (running) {
+    toast("A task is already running in this chat — press ↑ to resume it, or ⏹ to stop it.", { kind: "warn" });
+    return false;
   }
   setBusyUI(true);
   state.detached = false;
@@ -1366,7 +1424,7 @@ async function send() {
         className: "att-err muted small", textContent: "upload failed: " + e.message,
       }));
       setBusyUI(false);
-      return;
+      return false;
     }
   }
 
@@ -1440,7 +1498,7 @@ async function send() {
 }
 
 async function resumeJob(jobId) {
-  if (state.busy) return;
+  if (state.busy || state.stopping) return;
   const job = state.jobs.find((j) => j.id === jobId);
   const sid = job ? job.session_id : state.sessionId;
   if (!sid) return;
@@ -1455,7 +1513,13 @@ async function resumeJob(jobId) {
     state.jobs = await json(await api("/api/jobs"));
   } catch { /* keep cached list */ }
   const fresh = state.jobs.find((j) => j.id === jobId);
-  const msgs = await json(await api(`/api/sessions/${sid}/messages`));
+  let msgs;
+  try {
+    msgs = await json(await api(`/api/sessions/${sid}/messages`));
+  } catch {
+    toast("Could not reopen this task — check your connection.", { kind: "error" });
+    return;
+  }
   renderChat(msgs);
   if (!fresh || fresh.status !== "running") {
     state.jobId = null;
@@ -1501,9 +1565,27 @@ async function resumeJob(jobId) {
 }
 
 $("send-btn").onclick = async () => {
-  if (state.busy || (state.jobId && runningJobFor(state.sessionId))) await stopCurrent();
-  else send();
+  if (state.busy) { await stopCurrent(); return; }
+  const job = bgJobFor(state.sessionId);
+  if (job) { await resumeJob(job.id); return; }
+  send();
 };
+
+function submitPrimary() {
+  const hasDraft = !!($("input").value.trim() || state.pendingFiles.length);
+  if (state.busy) {
+    if (hasDraft) toast("JARVIS is still working — press ⏹ to stop it, or ⤓ to let it run in the background.", { kind: "warn" });
+    return;
+  }
+  if (state.stopping) return;
+  const job = bgJobFor(state.sessionId);
+  if (job) {
+    if (hasDraft) toast("This chat already has a task running — press ⏹ to stop it first.", { kind: "warn" });
+    else resumeJob(job.id);
+    return;
+  }
+  send();
+}
 
 function handleEvent(ev, asBody) {
   const a = uiState.activity;
@@ -1827,9 +1909,9 @@ input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickPalette(palette.index); return; }
     if (e.key === "Escape") { e.preventDefault(); closePalette(); return; }
   }
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
-    send();
+    submitPrimary();
   }
 });
 $("slash-hint").onclick = () => insertTrigger("/");

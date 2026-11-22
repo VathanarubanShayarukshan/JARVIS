@@ -202,7 +202,9 @@ async def run_agent(
                 if tc["name"].startswith("mcp__"):
                     result = await mcp_manager.call_tool(tc["name"], args)
                 else:
-                    result = registry.call(tc["name"], args)
+                    # sync tools (subprocess, urllib) must not hold the event loop,
+                    # or /stop and /jobs cannot be served until the tool returns
+                    result = await asyncio.to_thread(registry.call, tc["name"], args)
                 if len(result) > MAX_TOOL_RESULT_CHARS:
                     result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[truncated]"
                 yield {"type": "tool_result", "id": call_id, "name": tc["name"], "result": result}

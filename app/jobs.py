@@ -17,6 +17,8 @@ from . import database as db
 from .agent import run_agent
 from .database import append_message
 
+STOP_WAIT_SECONDS = 5
+
 
 class Job:
     def __init__(self, job_id: str, session_id: str):
@@ -107,10 +109,24 @@ class JobManager:
             return False
         job.task.cancel()
         try:
-            await job.task
-        except (asyncio.CancelledError, Exception):
+            await asyncio.wait({job.task}, timeout=STOP_WAIT_SECONDS)
+        except asyncio.CancelledError:
             pass
+        if job.status == "running":
+            # a tool that ignores cancellation must never leave the UI stuck on "running"
+            job.status = "stopped"
+            db.set_job_status(job.id, "stopped")
+            self._publish(job, {"type": "done", "content": "⏹ Stopped by user.", "stopped": True})
+            await self._notify(job)
         return True
+
+    async def stop_session(self, session_id: str) -> list[str]:
+        """Stop every layer still in flight for a chat, not just the newest job."""
+        stopped = []
+        for j in list(self._jobs.values()):
+            if j.session_id == session_id and j.status == "running" and await self.stop(j.id):
+                stopped.append(j.id)
+        return stopped
 
     async def follow(self, job: Job, after: int = 0) -> AsyncIterator[dict[str, Any]]:
         i = after

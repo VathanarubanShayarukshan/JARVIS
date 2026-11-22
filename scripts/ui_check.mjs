@@ -17,8 +17,13 @@ await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
 let mid = 0;
 const pending = new Map();
 const consoleErrors = [];
+const dialogs = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  if (m.method === "Page.javascriptDialogOpening") {
+    dialogs.push((m.params.type || "?") + ": " + (m.params.message || ""));
+    send("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+  }
   if (m.method === "Runtime.exceptionThrown") {
     consoleErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || "exception");
   }
@@ -582,6 +587,19 @@ check("project: deleted, its chat falls back to Chats with history", await until
   return gone && s && !s.project_id && !document.querySelector('.proj-folder[data-project="' + ${JSON.stringify(pid)} + '"]');
 })()`));
 
+// ---------- enter sends, stop button guards the run ----------
+await ev(`window.__newChat()`);
+await sleep(300);
+await ev(`window.__pickModel("|slow-6")`);
+await ev(`window.__type("enter key sends this")`);
+await ev(`document.getElementById("input").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`);
+check("enter: Enter sends the message and clears the composer",
+  await until(`state.busy && !document.getElementById("input").value && document.getElementById("chat").innerText.includes("enter key sends this")`, 8000));
+check("enter: send button becomes stop while the task runs",
+  await ev(`document.getElementById("send-btn").textContent === "⏹" && !document.getElementById("push-btn").classList.contains("hidden")`));
+await ev(`document.getElementById("send-btn").click()`);
+check("enter: stop frees the composer again", await until(`!state.busy && document.getElementById("send-btn").textContent !== "⏹"`, 8000));
+
 // ---------- stop cancels the AI process itself ----------
 const slowModel = await ev(`window.__pickModel("|slow-6")`);
 check("stop: slow model selected", !!slowModel, String(slowModel));
@@ -638,6 +656,18 @@ await ev(`window.__send("survive window close")`);
 await until(`state.busy && !!state.jobId`, 8000);
 const surviveId = await ev(`state.jobId`);
 check("survive: job running before reload", !!surviveId, String(surviveId));
+check("survive: tab close is blocked while a task was never pushed", await ev(`(() => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+})()`));
+check("survive: staying offers run-in-background or stay in tab", await until(`window.__modalOpen()
+  && /background/i.test(document.getElementById("modal-ok").textContent)
+  && /stay/i.test(document.getElementById("modal-cancel").textContent)`, 3000));
+await shot("17b-leave-choice.png");
+await ev(`document.getElementById("modal-cancel").click()`);
+await sleep(200);
+check("survive: staying keeps watching the task live", await ev(`!window.__modalOpen() && state.busy && !state.detached`));
 await send("Page.reload");
 check("survive: app boots after reload", await until(`!document.getElementById("app").classList.contains("hidden")`, 15000));
 await ev(HELPERS);
