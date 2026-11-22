@@ -118,6 +118,7 @@ async def run_agent(
 
     try:
         iterations = 0
+        summary_nudge = False
         while True:
             if settings.max_tool_iterations > 0 and iterations >= settings.max_tool_iterations:
                 break
@@ -174,6 +175,15 @@ async def run_agent(
                         await asyncio.sleep(wait)
 
             if not drafts:
+                if not accumulated_text.strip() and iterations > 1 and not summary_nudge:
+                    # providers sometimes end a tool run with an empty message; ask once
+                    # so the user still learns what changed instead of seeing nothing
+                    summary_nudge = True
+                    messages.append({
+                        "role": "user",
+                        "content": "Reply now with a short summary of what you did, including any file paths, URLs or commands the user needs.",
+                    })
+                    continue
                 break
 
             tool_calls = [drafts[i] for i in sorted(drafts)]

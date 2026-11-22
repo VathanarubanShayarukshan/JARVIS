@@ -1218,6 +1218,7 @@ function setBusyUI(busy) {
 function clearRunState() {
   if (state.ctrl) state.ctrl.abort();
   state.ctrl = null;
+  stopBgWatch();
   state.jobId = null;
   state.detached = false;
   setBusyUI(false);
@@ -1256,7 +1257,62 @@ function pushToBackground() {
   setBusyUI(false);
   updateBanner();
   if (uiState.activity) uiState.activity.status("Working in background…");
+  watchJobQuietly(state.jobId);
   return true;
+}
+
+/* While pushed away we still follow the server stream, so the pill shows real
+   progress ("12 tool calls · run_command") instead of looking frozen. */
+let bgWatch = null;
+
+function stopBgWatch() {
+  if (bgWatch) bgWatch.abort();
+  bgWatch = null;
+}
+
+async function watchJobQuietly(jobId) {
+  if (!jobId) return;
+  stopBgWatch();
+  const ctrl = new AbortController();
+  bgWatch = ctrl;
+  let tools = 0;
+  let lastTool = "";
+  let ended = false;
+  const started = Date.now();
+  const paint = () => {
+    if (state.jobId !== jobId || !uiState.activity) return;
+    const secs = Math.max(1, Math.round((Date.now() - started) / 1000));
+    uiState.activity.status(
+      lastTool
+        ? `Working in background… · ${tools} tool call${tools === 1 ? "" : "s"} · ${lastTool}`
+        : `Working in background… · ${secs}s`
+    );
+  };
+  try {
+    const r = await api(`/api/jobs/${jobId}/stream?after=0`, { signal: ctrl.signal });
+    if (!r.ok || !r.body) return;
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, nl).split("\n").find((l) => l.startsWith("data: "));
+        buf = buf.slice(nl + 2);
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if (ev.type === "tool_call") { tools++; lastTool = ev.name || ""; }
+        if (ev.type === "done" || ev.type === "error") ended = true;
+        if (ev.type !== "job") paint();
+      }
+    }
+  } catch { /* aborted, offline, or the tab went away */ }
+  if (bgWatch === ctrl) bgWatch = null;
+  if (ended && state.detached && state.jobId === jobId && !state.busy) resumeJob(jobId);
 }
 
 function detachQuietly() {
@@ -1266,7 +1322,7 @@ function detachQuietly() {
   if (state.ctrl) state.ctrl.abort();
   state.ctrl = null;
   setBusyUI(false);
-  loadJobs().then(() => { updateBanner(); renderSessions(); }).catch(() => {});
+  loadJobs().then(() => { updateBanner(); renderSessions(); watchJobQuietly(state.jobId); }).catch(() => {});
 }
 
 $("push-btn").onclick = async () => {
@@ -1314,6 +1370,7 @@ async function stopCurrent() {
   await Promise.all(calls);
   if (state.ctrl) state.ctrl.abort();
   state.ctrl = null;
+  stopBgWatch();
   state.jobId = null;
   state.stopping = false;
   setBusyUI(false);
@@ -1499,6 +1556,7 @@ async function send() {
 
 async function resumeJob(jobId) {
   if (state.busy || state.stopping) return;
+  stopBgWatch();
   const job = state.jobs.find((j) => j.id === jobId);
   const sid = job ? job.session_id : state.sessionId;
   if (!sid) return;

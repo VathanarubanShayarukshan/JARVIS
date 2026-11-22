@@ -17,6 +17,12 @@ def _tool(fn):
     return fn
 
 
+def _json_type(annotation) -> str:
+    """Declare real JSON types, otherwise models send numbers as strings."""
+    name = getattr(annotation, "__name__", "")
+    return {"int": "integer", "float": "number", "bool": "boolean"}.get(name, "string")
+
+
 def _describe(fn):
     import inspect
 
@@ -26,7 +32,7 @@ def _describe(fn):
     for pname, param in sig.parameters.items():
         if pname == "return":
             continue
-        props[pname] = {"type": "string", "description": ""}
+        props[pname] = {"type": _json_type(param.annotation), "description": ""}
         if param.default is inspect.Parameter.empty:
             required.append(pname)
     return {
@@ -107,6 +113,11 @@ def run_script(script: str, language: str = "python", timeout: int = DEFAULT_TIM
 
 def subprocess_run(argv: list[str], timeout: int, cwd: Path | None = None):
     import subprocess
+
+    try:
+        timeout = max(1, int(float(timeout)))
+    except (TypeError, ValueError):
+        timeout = DEFAULT_TIMEOUT
 
     try:
         return subprocess.run(

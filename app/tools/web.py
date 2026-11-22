@@ -7,6 +7,12 @@ import httpx
 TIMEOUT = httpx.Timeout(30.0, connect=8.0)
 
 
+def _json_type(annotation) -> str:
+    """Declare real JSON types, otherwise models send numbers as strings."""
+    name = getattr(annotation, "__name__", "")
+    return {"int": "integer", "float": "number", "bool": "boolean"}.get(name, "string")
+
+
 def _tool(fn):
     fn._tool = _describe(fn)
     return fn
@@ -21,7 +27,7 @@ def _describe(fn):
     for pname, param in sig.parameters.items():
         if pname == "return":
             continue
-        props[pname] = {"type": "string", "description": ""}
+        props[pname] = {"type": _json_type(param.annotation), "description": ""}
         if param.default is inspect.Parameter.empty:
             required.append(pname)
     return {
@@ -32,6 +38,14 @@ def _describe(fn):
             "parameters": {"type": "object", "properties": props, "required": required},
         },
     }
+
+
+def _as_int(value, default: int, ceiling: int) -> int:
+    """Models still send numbers as strings; slicing with one raises TypeError."""
+    try:
+        return max(1, min(int(value), ceiling))
+    except (TypeError, ValueError):
+        return default
 
 
 def _strip_html(raw: str, max_chars: int = 60000) -> str:
@@ -46,6 +60,7 @@ def _strip_html(raw: str, max_chars: int = 60000) -> str:
 def fetch_url(url: str, max_chars: int = 60000) -> dict:
     """Fetch a web page or raw endpoint and return its text content
     (HTML is stripped to readable text). Use to read public docs, pages, APIs."""
+    max_chars = _as_int(max_chars, 60000, 200000)
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
             r = client.get(url, headers={"User-Agent": "Mozilla/5.0 jarvis"})
@@ -78,7 +93,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
             if r.status_code != 200:
                 return {"query": query, "error": f"search failed: HTTP {r.status_code}"}
             results = _parse_ddg(r.text)
-            return {"query": query, "results": results[: max(1, min(max_results, 10))]}
+            return {"query": query, "results": results[: _as_int(max_results, 5, 10)]}
     except Exception as e:  # noqa: BLE001
         return {"query": query, "error": f"{type(e).__name__}: {e}"}
 

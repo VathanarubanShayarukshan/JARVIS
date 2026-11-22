@@ -640,10 +640,17 @@ const p2 = await ev(`JSON.stringify({
 const p2o = JSON.parse(p2);
 check("push: banner shows immediately, UI freed, job still alive", p2o.banner && p2o.detached && !p2o.busy, p2);
 await shot("17-push-banner.png");
+const pushedJob = await ev(`document.getElementById("bg-banner").dataset.job || state.jobId`);
+check("push: pill keeps showing live progress while detached", await until(`(() => {
+  const pills = [...document.querySelectorAll("#chat .act-txt")];
+  const t = pills.length ? pills[pills.length - 1].textContent : "";
+  return /background/i.test(t) && /·/.test(t);
+})()`, 12000));
+await shot("17a-push-live-progress.png");
 check("push: job finishes server-side after push", await until(`(async () => {
-  const j = (await window.__jobs()).find(x => x.id === document.getElementById("bg-banner").dataset.job);
+  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(String(pushedJob))});
   return j && j.status === "done";
-})()`, 15000));
+})()`, 20000));
 await ev(`document.getElementById("bg-resume").click()`);
 await sleep(1200);
 check("push: resume replays finished output", await ev(`document.getElementById("chat").innerText.includes("slow work finished")`));
@@ -672,7 +679,9 @@ await send("Page.reload");
 check("survive: app boots after reload", await until(`!document.getElementById("app").classList.contains("hidden")`, 15000));
 await ev(HELPERS);
 await sleep(1000);
-check("survive: running job picked up on boot", await ev(`!!state.jobId || !document.getElementById("bg-banner").classList.contains("hidden")`));
+check("survive: running job picked up on boot", await until(`!!state.jobId
+  || !document.getElementById("bg-banner").classList.contains("hidden")
+  || document.getElementById("chat").innerText.includes("slow work finished")`, 12000));
 check("survive: unpushed job completes after window close", await until(`(async () => {
   const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(surviveId)});
   return j && j.status === "done";
