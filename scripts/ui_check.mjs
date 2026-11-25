@@ -655,49 +655,37 @@ await ev(`document.getElementById("bg-resume").click()`);
 await sleep(1200);
 check("push: resume replays finished output", await ev(`document.getElementById("chat").innerText.includes("slow work finished")`));
 
-// close window mid-run WITHOUT push -> confirm, and "Stop task" cancels the server job
+// closing the window always keeps the task running in the background (no push needed)
 await ev(`window.__newChat()`);
 await sleep(300);
 await ev(`window.__pickModel("|slow-6")`);
-await ev(`window.__send("stop on window close")`);
+await ev(`window.__send("keep running on window close")`);
 await until(`state.busy && !!state.jobId`, 8000);
 const closeId = await ev(`state.jobId`);
 check("close: job running before close", !!closeId, String(closeId));
-check("close: tab close is blocked while a task was never pushed", await ev(`(() => {
+check("close: no leave confirmation is forced (closing is safe)", await ev(`(() => {
   const e = new Event("beforeunload", { cancelable: true });
   window.dispatchEvent(e);
-  return e.defaultPrevented;
+  return !e.defaultPrevented;
 })()`));
-check("close: staying offers Stop task or Run in background", await until(`window.__modalOpen()
-  && /stop/i.test(document.getElementById("modal-ok").textContent)
-  && /background/i.test(document.getElementById("modal-cancel").textContent)`, 3000));
-await shot("17b-leave-choice.png");
-await ev(`document.getElementById("modal-ok").click()`);
-check("close: Stop task cancels the server job", await until(`(async () => {
-  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(closeId)});
-  return j && j.status === "stopped";
-})()`, 8000));
-check("close: composer freed after stop", await ev(`!state.busy && !state.jobId`));
-await shot("18-close-stopped.png");
-
-// unpushed job is stopped when the page actually unloads (reload fires pagehide)
-await ev(`window.__newChat()`);
-await sleep(300);
-await ev(`window.__pickModel("|slow-6")`);
-await ev(`window.__send("stop when the page unloads")`);
-await until(`state.busy && !!state.jobId`, 8000);
-const unloadId = await ev(`state.jobId`);
-check("unload: job running before reload", !!unloadId, String(unloadId));
 await send("Page.reload");
-check("unload: app boots after reload", await until(`!document.getElementById("app").classList.contains("hidden")`, 15000));
+check("close: app boots after reload", await until(`!document.getElementById("app").classList.contains("hidden")`, 15000));
 await ev(HELPERS);
 await sleep(800);
-check("unload: unpushed job is stopped after the page unloads", await until(`(async () => {
-  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(unloadId)});
-  return j && j.status === "stopped";
-})()`, 10000));
+check("close: unpushed job is NOT stopped when the page unloads", await until(`(async () => {
+  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(closeId)});
+  return j && (j.status === "running" || j.status === "done");
+})()`, 8000));
+check("close: unpushed job completes server-side", await until(`(async () => {
+  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(closeId)});
+  return j && j.status === "done";
+})()`, 20000));
+await ev(`(async () => { await selectSession(state.sessionId); })()`);
+await sleep(600);
+check("close: finished answer is retrievable after returning", await ev(`document.getElementById("chat").innerText.includes("slow work finished")`));
+await shot("18-survived.png");
 
-// backgrounding (mobile tab switch / bfcache) must NOT stop the job
+// backgrounding (mobile tab switch / bfcache) also keeps the job running
 await ev(`window.__newChat()`);
 await sleep(300);
 await ev(`window.__pickModel("|slow-6")`);
@@ -708,14 +696,14 @@ check("background: job running before hide", !!bgId, String(bgId));
 await ev(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }))`);
 await ev(`window.dispatchEvent(new Event("pagehide"))`);
 await sleep(500);
-check("background: pagehide without a real close keeps the job running", await until(`(async () => {
+check("background: pagehide keeps the job running", await until(`(async () => {
   const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(bgId)});
   return j && j.status === "running";
 })()`, 5000));
 await ev(`document.getElementById("send-btn").click()`);
 await until(`!state.busy`, 8000);
 
-// pushed job survives the page unloading (push is the background opt-in)
+// explicit push detaches the UI and the job still survives a reload
 await ev(`window.__newChat()`);
 await sleep(300);
 await ev(`window.__pickModel("|slow-6")`);
@@ -723,21 +711,16 @@ await ev(`window.__send("survive after push")`);
 await until(`state.busy && !!state.jobId`, 8000);
 await ev(`document.getElementById("push-btn").click()`);
 await sleep(250);
-const pushedId = await ev(`state.pushed ? state.jobId : null`);
-check("push: pushed flag set after pressing ⤓", !!pushedId, String(pushedId));
+const pushedId = await ev(`state.detached ? state.jobId : null`);
+check("push: UI detached after pressing ⤓", !!pushedId, String(pushedId));
 await send("Page.reload");
 check("push: app boots after reload", await until(`!document.getElementById("app").classList.contains("hidden")`, 15000));
 await ev(HELPERS);
 await sleep(800);
-check("push: pushed job is NOT stopped when the page unloads", await until(`(async () => {
-  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(String(pushedId))});
-  return j && (j.status === "running" || j.status === "done");
-})()`, 8000));
 check("push: pushed job completes server-side", await until(`(async () => {
   const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(String(pushedId))});
   return j && j.status === "done";
 })()`, 20000));
-await shot("18-survived.png");
 
 // switching chats mid-run must not kill the server job
 await ev(`window.__newChat()`);

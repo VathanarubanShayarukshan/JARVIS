@@ -44,8 +44,6 @@ const state = {
   ctrl: null,
   jobId: null,
   detached: false,
-  pushed: false,
-  leaving: false,
   stopping: false,
   pendingFiles: [],
   dragId: null,
@@ -1223,7 +1221,6 @@ function clearRunState() {
   stopBgWatch();
   state.jobId = null;
   state.detached = false;
-  state.pushed = false;
   setBusyUI(false);
 }
 
@@ -1240,9 +1237,7 @@ function updateBanner() {
   if (job && !state.busy) {
     banner.dataset.job = job.id;
     banner.classList.remove("hidden");
-    $("bg-text").textContent = state.pushed
-      ? "Working in the background — close this window if you like, it keeps running."
-      : "Working in the background — press ⤓ to keep it running after you close this window.";
+    $("bg-text").textContent = "Working in the background — close this window if you like, it keeps running.";
     $("send-btn").textContent = "▶";
     $("send-btn").title = "Resume the running task";
   } else {
@@ -1344,7 +1339,6 @@ $("push-btn").onclick = async () => {
     toast("JARVIS has not reached the server yet — try again in a second.", { kind: "warn" });
     return;
   }
-  state.pushed = true;
   toast("Task pushed to the background — it keeps running on the server.", { kind: "info" });
 };
 
@@ -1369,7 +1363,6 @@ async function stopCurrent() {
   if (!state.busy && !jobId) return;
   state.stopping = true;
   state.detached = false;
-  state.pushed = false;
   if (uiState.activity) uiState.activity.status("Stopping…");
   const calls = [];
   if (jobId) calls.push(api(`/api/jobs/${jobId}/stop`, { method: "POST" }).catch(() => {}));
@@ -1386,24 +1379,12 @@ async function stopCurrent() {
   $("input").focus();
 }
 
-function stopOnClose() {
-  if (state.pushed) return;
-  const sid = state.sessionId;
-  const id = state.jobId || (bgJobFor(sid) || {}).id;
-  if (!id && !sid) return;
-  const headers = {};
-  if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  if (id) fetch(`/api/jobs/${id}/stop`, { method: "POST", headers, keepalive: true }).catch(() => {});
-  if (sid) fetch(`/api/sessions/${sid}/stop`, { method: "POST", headers, keepalive: true }).catch(() => {});
-}
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     if (state.busy) detachQuietly();
     flushPrefs();
     return;
   }
-  state.leaving = false;
   pullPrefs();
   loadJobs().then(() => {
     updateBanner();
@@ -1412,43 +1393,9 @@ document.addEventListener("visibilitychange", () => {
     if (job && !state.busy && state.detached) resumeJob(job.id);
   }).catch(() => {});
 });
-window.addEventListener("pagehide", (e) => {
+window.addEventListener("pagehide", () => {
   flushPrefs();
-  if (state.leaving && !e.persisted) stopOnClose();
-  state.leaving = false;
 });
-
-window.addEventListener("beforeunload", (e) => {
-  if (state.pushed) return;
-  if (!state.busy && !state.jobId) return;
-  state.leaving = true;
-  e.preventDefault();
-  e.returnValue = "";
-  setTimeout(() => {
-    if (document.visibilityState === "visible") {
-      state.leaving = false;
-      if (!state.pushed && (state.busy || state.jobId)) askLeaveChoice();
-    }
-  }, 500);
-});
-
-async function askLeaveChoice() {
-  const stop = await openModal({
-    title: "JARVIS is still working on this prompt",
-    text: "Closing the tab will stop the task on the server. Stop it now, or run it in the background and close the window freely.",
-    icon: "⤓",
-    danger: true,
-    okLabel: "Stop task",
-    cancelLabel: "Run in background",
-  });
-  if (stop) {
-    await stopCurrent();
-    toast("Task stopped on the server.", { kind: "warn" });
-  } else if (pushToBackground()) {
-    state.pushed = true;
-    toast("Task pushed to the background — it keeps running on the server.", { kind: "info" });
-  }
-}
 
 async function readSSE(r, asBody) {
   const reader = r.body.getReader();
@@ -1493,7 +1440,6 @@ async function send() {
   }
   setBusyUI(true);
   state.detached = false;
-  state.pushed = false;
   state.jobId = null;
 
   // WhatsApp-style: upload attached files to attachments/<session>/
@@ -1615,14 +1561,12 @@ async function resumeJob(jobId) {
   if (!fresh || fresh.status !== "running") {
     state.jobId = null;
     state.detached = false;
-    state.pushed = false;
     setBusyUI(false);
     updateBanner();
     return;
   }
   setBusyUI(true);
   state.detached = false;
-  state.pushed = false;
   state.jobId = jobId;
   updateBanner();
 
