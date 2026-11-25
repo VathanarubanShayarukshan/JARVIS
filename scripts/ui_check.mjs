@@ -697,6 +697,24 @@ check("unload: unpushed job is stopped after the page unloads", await until(`(as
   return j && j.status === "stopped";
 })()`, 10000));
 
+// backgrounding (mobile tab switch / bfcache) must NOT stop the job
+await ev(`window.__newChat()`);
+await sleep(300);
+await ev(`window.__pickModel("|slow-6")`);
+await ev(`window.__send("keep running when backgrounded")`);
+await until(`state.busy && !!state.jobId`, 8000);
+const bgId = await ev(`state.jobId`);
+check("background: job running before hide", !!bgId, String(bgId));
+await ev(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }))`);
+await ev(`window.dispatchEvent(new Event("pagehide"))`);
+await sleep(500);
+check("background: pagehide without a real close keeps the job running", await until(`(async () => {
+  const j = (await window.__jobs()).find(x => x.id === ${JSON.stringify(bgId)});
+  return j && j.status === "running";
+})()`, 5000));
+await ev(`document.getElementById("send-btn").click()`);
+await until(`!state.busy`, 8000);
+
 // pushed job survives the page unloading (push is the background opt-in)
 await ev(`window.__newChat()`);
 await sleep(300);

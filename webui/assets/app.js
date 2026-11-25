@@ -45,6 +45,7 @@ const state = {
   jobId: null,
   detached: false,
   pushed: false,
+  leaving: false,
   stopping: false,
   pendingFiles: [],
   dragId: null,
@@ -1402,6 +1403,7 @@ document.addEventListener("visibilitychange", () => {
     flushPrefs();
     return;
   }
+  state.leaving = false;
   pullPrefs();
   loadJobs().then(() => {
     updateBanner();
@@ -1410,18 +1412,23 @@ document.addEventListener("visibilitychange", () => {
     if (job && !state.busy && state.detached) resumeJob(job.id);
   }).catch(() => {});
 });
-window.addEventListener("pagehide", () => {
+window.addEventListener("pagehide", (e) => {
   flushPrefs();
-  stopOnClose();
+  if (state.leaving && !e.persisted) stopOnClose();
+  state.leaving = false;
 });
 
 window.addEventListener("beforeunload", (e) => {
   if (state.pushed) return;
   if (!state.busy && !state.jobId) return;
+  state.leaving = true;
   e.preventDefault();
   e.returnValue = "";
   setTimeout(() => {
-    if (!state.pushed && (state.busy || state.jobId) && document.visibilityState === "visible") askLeaveChoice();
+    if (document.visibilityState === "visible") {
+      state.leaving = false;
+      if (!state.pushed && (state.busy || state.jobId)) askLeaveChoice();
+    }
   }, 500);
 });
 
