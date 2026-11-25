@@ -3,7 +3,7 @@
 import json
 import time
 import uuid
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 9504
 STEPS = 12
@@ -54,17 +54,22 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(sse_chunk({**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}))
             self.wfile.flush()
 
-        emit({"role": "assistant", "content": ""})
-        for i in range(STEPS):
-            time.sleep(STEP_DELAY)
-            emit({"content": f"step {i + 1}/{STEPS} "})
-        emit({"content": "\n\nslow work finished"})
-        emit({}, "stop")
-        self.wfile.write(b"data: [DONE]\n\n")
-        self.wfile.flush()
+        try:
+            emit({"role": "assistant", "content": ""})
+            for i in range(STEPS):
+                time.sleep(STEP_DELAY)
+                emit({"content": f"step {i + 1}/{STEPS} "})
+            emit({"content": "\n\nslow work finished"})
+            emit({}, "stop")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
         self.close_connection = True
 
 
 if __name__ == "__main__":
     print(f"Slow stub LLM listening on http://127.0.0.1:{PORT}/v1")
-    HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server.daemon_threads = True
+    server.serve_forever()
